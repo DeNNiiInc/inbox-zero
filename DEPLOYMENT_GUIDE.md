@@ -235,6 +235,7 @@ QSTASH_TOKEN="eyJ..."
 MICROSOFT_CLIENT_ID="your-client-id"
 MICROSOFT_CLIENT_SECRET="your-client-secret"
 MICROSOFT_TENANT_ID="your-tenant-id"
+MICROSOFT_WEBHOOK_CLIENT_STATE="your-webhook-secret"  # Generate with: openssl rand -hex 32
 
 # Google (Placeholders if not using Google OAuth)
 GOOGLE_CLIENT_ID="placeholder"
