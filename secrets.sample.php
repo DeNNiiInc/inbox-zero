@@ -62,6 +62,7 @@ $secrets['wsl_pass'] = 'YOUR_WSL_PASSWORD';
 $secrets['microsoft_client_id']     = 'YOUR_AZURE_CLIENT_ID';
 $secrets['microsoft_client_secret'] = 'YOUR_AZURE_CLIENT_SECRET';
 $secrets['microsoft_tenant_id']     = 'YOUR_AZURE_TENANT_ID';
+$secrets['microsoft_webhook_client_state'] = 'YOUR_WEBHOOK_SECRET'; // Generate with: openssl rand -hex 32
 
 // Microsoft OAuth Redirect URIs (add these in Azure Portal > App Registrations > Authentication)
 // https://your-domain.com/api/auth/callback/microsoft
