@@ -2,7 +2,7 @@
 set -e
 
 # Configuration
-REPO_URL="https://github.com/elie222/inbox-zero.git"
+REPO_URL="https://github.com/DeNNiiInc/inbox-zero.git"
 APP_DIR="/var/www/inbox-zero"
 NODE_VERSION="22.0.0"
 
