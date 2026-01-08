@@ -77,3 +77,8 @@ docker-compose.override.yml
 logs
 
 coverage
+
+# secrets
+secrets.php
+remote_env_file
+

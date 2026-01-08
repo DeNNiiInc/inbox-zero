@@ -12,7 +12,7 @@ const MAX_CONTENT_SIZE = 1024 * 1024; // 1MB
 export type ResearchSource = "perplexity" | "websearch";
 
 function isRedisConfigured(): boolean {
-  return Boolean(env.UPSTASH_REDIS_URL && env.UPSTASH_REDIS_TOKEN);
+  return Boolean(env.REDIS_URL || (env.UPSTASH_REDIS_URL && env.UPSTASH_REDIS_TOKEN));
 }
 
 function getResearchCacheKey(
