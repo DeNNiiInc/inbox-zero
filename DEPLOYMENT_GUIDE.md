@@ -31,6 +31,7 @@
 | Anthropic | AI Provider (Backup) | [Anthropic Console](https://console.anthropic.com/) |
 | Upstash QStash | Background Jobs | [Upstash Console](https://console.upstash.com/) |
 | Cloudflare | Tunnel/DNS | [Cloudflare Dashboard](https://dash.cloudflare.com/) |
+| **Reference** | **OpenAI Models** | [OpenAI Model Documentation](https://platform.openai.com/docs/models?utm_source=chatgpt.com) |
 
 ### Local Development Requirements
 
@@ -205,11 +206,22 @@ chmod +x /root/deploy_build.sh
 
 ### 5.1 Create `.env` File
 
-Create `/var/www/inbox-zero/apps/web/.env`:
+**Option A: Automated Generation** (Recommended)
+
+If you have `secrets.php` configured locally, generate the `.env` file automatically:
+
+```bash
+# Generate and upload .env to server
+bash generate_env.sh | ssh root@SERVER_IP 'cat > /var/www/inbox-zero/apps/web/.env'
+```
+
+**Option B: Manual Creation**
+
+Create `/var/www/inbox-zero/apps/web/.env` manually:
 
 ```env
 # Core
-NEXT_PUBLIC_BASE_URL=https://inbox.beyondcloud.solutions/
+NEXT_PUBLIC_BASE_URL=https://inbox.beyondcloud.solutions
 NODE_ENV=production
 
 # Database
@@ -219,11 +231,17 @@ DIRECT_URL="postgresql://postgres:password@localhost:5432/inboxzero?schema=publi
 # Redis (Local - using ioredis fork)
 REDIS_URL="redis://localhost:6379"
 
-# AI Providers
-OPENAI_API_KEY="sk-proj-..."
-ANTHROPIC_API_KEY="sk-ant-api03-..."
+# AI Providers (2026 Configuration)
 DEFAULT_LLM_PROVIDER="openai"
-OPENROUTER_API_KEY="sk-or-v1-..."
+DEFAULT_LLM_MODEL="gpt-5.2"           # Flagship model (Outlook/Complex tasks)
+CHAT_LLM_PROVIDER="openai"
+CHAT_LLM_MODEL="gpt-5-mini"           # Economy model (Gmail/Simple tasks)
+ECONOMY_LLM_PROVIDER="openai"
+ECONOMY_LLM_MODEL="gpt-5-mini"        # Background tasks
+
+OPENAI_API_KEY="sk-proj-..."
+ANTHROPIC_API_KEY="sk-ant-api03-..."  # Backup provider
+OPENROUTER_API_KEY="sk-or-v1-..."     # Optional aggregator
 
 # QStash (Background Jobs)
 QSTASH_CURRENT_SIGNING_KEY="sig_..."
@@ -234,13 +252,14 @@ QSTASH_TOKEN="eyJ..."
 # Microsoft OAuth
 MICROSOFT_CLIENT_ID="your-client-id"
 MICROSOFT_CLIENT_SECRET="your-client-secret"
-MICROSOFT_TENANT_ID="your-tenant-id"
+MICROSOFT_TENANT_ID="common"  # CRITICAL: Use "common" for multi-tenant support, NOT a specific tenant ID
 MICROSOFT_WEBHOOK_CLIENT_STATE="your-webhook-secret"  # Generate with: openssl rand -hex 32
 
-# Google (Placeholders if not using Google OAuth)
+# Google OAuth (set to placeholder if not using Gmail)
 GOOGLE_CLIENT_ID="placeholder"
 GOOGLE_CLIENT_SECRET="placeholder"
 GOOGLE_PUBSUB_TOPIC_NAME="projects/placeholder/topics/placeholder"
+GOOGLE_PUBSUB_VERIFICATION_TOKEN="placeholder"
 
 # Security Keys (generate with: openssl rand -hex 32)
 AUTH_SECRET="your-64-char-hex-string"
@@ -261,6 +280,17 @@ LOG_ZOD_ERRORS=true
 cd /var/www/inbox-zero/apps/web
 npx prisma migrate deploy
 ```
+
+### 5.3 AI Provider Optimization (Automatic)
+
+The system is configured to optimize AI model usage based on the email provider:
+
+| Provider | Model | Description |
+|----------|-------|-------------|
+| **Gmail** | `gpt-5-mini` | Cost-effective model for high-volume email processing. |
+| **Outlook / M365** | `gpt-5.2` | Premium model for complex enterprise tasks and reasoning. |
+
+*This logic is handled in `apps/web/utils/ai/provider-optimization.ts`.*
 
 ---
 
@@ -315,7 +345,88 @@ echo "Restart command issued."
 
 ---
 
-## 8. Troubleshooting
+## 8. Google OAuth Setup
+
+> [!NOTE]
+> This section is required if you want to support Gmail accounts.
+
+### 8.1 Configure Consent Screen (Google Auth Platform)
+1. Go to [Google Cloud Console](https://console.cloud.google.com/).
+2. Navigate to **"APIs & Services"** > **"OAuth consent screen"**.
+   - *Note: You may be redirected to "Google Auth Platform".*
+3. In the left sidebar, click **"Branding"**:
+   - **App Name**: Enter `Inbox Zero`.
+   - **User Support Email**: Select your email.
+   - Click **Save**.
+4. In the left sidebar, click **"Audience"**:
+   - Scroll down to "User type" and select **External**.
+   - Click **Save**.
+5. In the left sidebar, click **"Data Access"**:
+   - This may be where you add scopes later, but for now, ensure Branding and Audience are saved.
+
+### 8.2 Create OAuth Credentials
+1. In the left sidebar, click **"Clients"** (or return to **"Credentials"** in the main menu).
+2. Click **+ Create Client** (or **+ Create Credentials** > **OAuth client ID**).
+3. **Application Type**: Select **Web application**.
+   - *If you don't see this, ensure you are in the "OAuth client ID" creation flow.*
+4. **Name**: `Inbox Zero Production`.
+5. **Authorized JavaScript origins**:
+   - `https://inbox.beyondcloud.solutions`
+   - `http://localhost:3000` (for local dev)
+6. **Authorized redirect URIs**:
+   - `https://inbox.beyondcloud.solutions/api/auth/callback/google`
+   - `https://inbox.beyondcloud.solutions/api/google/linking/callback`
+   - `https://inbox.beyondcloud.solutions/api/google/calendar/callback`
+   - *(Add localhost versions if developing locally)*
+7. Click **Create** (or **Save**).
+8. Copy the **Client ID** and **Client Secret** into your `.env` file.
+
+### 8.3 Configure Scopes
+1. In the left sidebar, click **"Data Access"**.
+2. Click the **"Add or Remove Scopes"** button.
+3. In the "Manually add scopes" section (you may need to scroll down or look for a manual entry box), paste these URLs one by one or as a list:
+   - `https://www.googleapis.com/auth/userinfo.profile`
+   - `https://www.googleapis.com/auth/userinfo.email`
+   - `https://www.googleapis.com/auth/gmail.modify`
+   - `https://www.googleapis.com/auth/gmail.settings.basic`
+   - `https://www.googleapis.com/auth/contacts`
+   - `https://www.googleapis.com/auth/calendar`
+4. Click **Update** (or **Save**).
+
+### 8.4 Enable APIs
+Search for and enable these APIs in "Enabled APIs & services":
+- **Gmail API**
+- **Google People API**
+- **Google Calendar API**
+
+### 8.5 Configure Real-time Notifications (PubSub)
+1. Search for "Pub/Sub" in Google Cloud Console.
+2. **Create Topic**:
+   - Click **Create Topic**.
+   - Topic ID: `inbox-zero-production`.
+   - **Important**: Uncheck "Add a default subscription".
+   - Click **Create**.
+3. Add `projects/YOUR_PROJECT_ID/topics/inbox-zero-production` to `GOOGLE_PUBSUB_TOPIC_NAME` in `.env`.
+   - *(Replace YOUR_PROJECT_ID with your actual project ID shown in the console URL or dashboard)*
+4. **Create Subscription**:
+   - Click on the topic you just created (ID `inbox-zero-production`).
+   - Scroll down or look for **Create Subscription**.
+   - Subscription ID: `inbox-zero-sub`.
+   - **Delivery Type**: Select **Push**.
+   - **Endpoint URL**: `https://inbox.beyondcloud.solutions/api/google/webhook?token=YOUR_VERIFICATION_TOKEN`
+     - *(Generate a random string for `YOUR_VERIFICATION_TOKEN`, e.g., `openssl rand -hex 16`, and save it as `GOOGLE_PUBSUB_VERIFICATION_TOKEN` in `.env`)*
+   - Click **Create**.
+5. **Permissions** (Critical for Gmail to send notifications):
+   - Go back to the **Topic** page (`inbox-zero-production`).
+   - select the topic checkbox and click **Show Info Panel** (top right corner icon "i") or "View Permissions".
+   - Click **Add Principal**.
+   - New Principal: `gmail-api-push@system.gserviceaccount.com`
+   - Role: **Pub/Sub Publisher**.
+   - Click **Save**.
+
+---
+
+## 9. Troubleshooting
 
 ### Redis Connection Errors
 
@@ -340,6 +451,37 @@ AADSTS50011: The redirect URI does not match
 - Go to Azure AD > App Registrations > Your App > Authentication
 - Add: `https://inbox.beyondcloud.solutions/api/auth/callback/microsoft`
 
+### Multi-Tenant "Mailbox Inactive" Error
+
+```
+The mailbox is either inactive, soft-deleted, or is hosted on-premise.
+```
+
+**Cause:** `MICROSOFT_TENANT_ID` is set to a specific tenant ID instead of `"common"`.
+
+**Solution:**
+1. Update `.env` on the server:
+   ```bash
+   sed -i 's/MICROSOFT_TENANT_ID="[^"]*"/MICROSOFT_TENANT_ID="common"/' /var/www/inbox-zero/apps/web/.env
+   ```
+2. Clear the user's OAuth tokens in the database:
+   ```sql
+   UPDATE "Account" SET access_token = NULL, refresh_token = NULL
+   WHERE id = (SELECT "accountId" FROM "EmailAccount" WHERE email = 'user@external-tenant.com');
+   ```
+3. Restart the application
+4. Have the user sign out and sign back in
+
+### Multi-Tenant Admin Consent
+
+For external tenants to use the app, an admin must grant consent:
+
+```
+https://login.microsoftonline.com/{tenant-domain}/adminconsent?client_id={your-client-id}
+```
+
+Replace `{tenant-domain}` with the external tenant's domain (e.g., `contoso.com`).
+
 ### AI "Unexpected Error"
 
 Check logs for missing API keys:
@@ -349,9 +491,38 @@ tail -f /var/log/inbox-zero.log | grep -i "api key"
 
 Ensure `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are set in `.env`.
 
+### Google "Access blocked: App has not completed verification"
+
+```
+Error 403: access_denied
+The app is currently being tested, and can only be accessed by developer-approved testers.
+```
+
+**Cause:** The Google Cloud Project is in **"Testing"** mode (default) and your email is not in the "Test users" list.
+
+**Solution:**
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) > **Audience**.
+2. Scroll to **"Test users"**.
+3. Click **+ Add users** and enter your email address (e.g., `dennii.inc@gmail.com`).
+4. Save and try logging in again.
+
+### Google "Redirect URI mismatch" (Error 400)
+
+```
+Error 400: redirect_uri_mismatch
+```
+
+**Cause:** The application URL may contain a trailing slash (e.g., `.solutions/`), causing Google to see a double slash `//` in the callback URL.
+
+**Solution:**
+Add the "double slash" URI to **Authorized redirect URIs** in Google Cloud Console:
+`https://inbox.beyondcloud.solutions//api/google/calendar/callback`
+*(Note the `//` in the path)*
+
+
 ---
 
-## 9. Maintenance Commands
+## 10. Maintenance Commands
 
 ### View Logs
 ```bash
@@ -379,9 +550,14 @@ pgrep -f "next-server" && echo "Running" || echo "Stopped"
 
 | File | Purpose |
 |------|---------|
-| `secrets.php` | Local credential storage (gitignored) |
-| `remote_env_file` | Template for server .env |
-| `local_build_fast.sh` | Local build script |
-| `deploy_build.sh` | Remote deployment script |
-| `/root/restart_app.sh` | Application restart script |
-| `/var/log/inbox-zero.log` | Application logs |
+| `secrets.php` | All credentials - source of truth (gitignored) |
+| `secrets.sample.php` | Template for secrets.php with all required fields |
+| `remote_env_file` | Template for server .env file |
+| `generate_env.sh` | Generates .env from secrets.php for automated setup |
+| `redeploy_ai_agent.sh` | **Master deployment script** - parses secrets.php, builds, uploads, deploys |
+| `local_build_fast.sh` | Local build wrapper (copies to native filesystem for speed) |
+| `local_build.sh` | Core build logic (installs deps, builds Next.js, packages artifact) |
+| `deploy_build.sh` | Remote deployment script (extracts artifact, restarts app) |
+| `/root/restart_app.sh` | Application restart script (on server) |
+| `/var/log/inbox-zero.log` | Application logs (on server) |
+| `.agent/workflows/deploy-inbox-zero.md` | AI agent deployment workflow |
