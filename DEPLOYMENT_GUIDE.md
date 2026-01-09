@@ -426,7 +426,57 @@ Search for and enable these APIs in "Enabled APIs & services":
 
 ---
 
-## 9. Troubleshooting
+## 9. Cron Job Setup (Required for Push Notifications)
+
+> [!IMPORTANT]
+> Gmail and Outlook watch subscriptions **expire after 7 days**. Without a cron job to renew them, push notifications for new emails will stop working.
+
+### 9.1 Automated Setup
+
+Run the setup script from your local WSL environment:
+
+```bash
+bash setup_cron_jobs.sh
+```
+
+This script:
+1. Reads `CRON_SECRET` from `secrets.php`
+2. Installs a cron job at `/etc/cron.d/inbox-zero`
+3. Triggers an initial watch renewal
+
+### 9.2 Manual Setup
+
+If you prefer manual setup, SSH into your server and create:
+
+```bash
+cat > /etc/cron.d/inbox-zero << 'EOF'
+# Gmail/Outlook watch renewal - runs every 6 hours
+0 */6 * * * root curl -s -X POST "http://localhost:3000/api/watch/all" -H "Content-Type: application/json" -d '{"CRON_SECRET":"YOUR_CRON_SECRET_HERE"}' >> /var/log/inbox-zero-cron.log 2>&1
+EOF
+
+chmod 644 /etc/cron.d/inbox-zero
+```
+
+Replace `YOUR_CRON_SECRET_HERE` with your actual `CRON_SECRET` from `.env`.
+
+### 9.3 Verify Cron Jobs
+
+```bash
+# Check cron job is installed
+cat /etc/cron.d/inbox-zero
+
+# Check cron execution logs
+tail -f /var/log/inbox-zero-cron.log
+
+# Manually trigger watch renewal
+curl -X POST "http://localhost:3000/api/watch/all" \
+  -H "Content-Type: application/json" \
+  -d '{"CRON_SECRET":"YOUR_CRON_SECRET"}'
+```
+
+---
+
+## 10. Troubleshooting
 
 ### Redis Connection Errors
 
@@ -522,7 +572,7 @@ Add the "double slash" URI to **Authorized redirect URIs** in Google Cloud Conso
 
 ---
 
-## 10. Maintenance Commands
+## 11. Maintenance Commands
 
 ### View Logs
 ```bash
@@ -554,6 +604,7 @@ pgrep -f "next-server" && echo "Running" || echo "Stopped"
 | `secrets.sample.php` | Template for secrets.php with all required fields |
 | `remote_env_file` | Template for server .env file |
 | `generate_env.sh` | Generates .env from secrets.php for automated setup |
+| `setup_cron_jobs.sh` | Installs cron jobs for watch renewal on server |
 | `redeploy_ai_agent.sh` | **Master deployment script** - parses secrets.php, builds, uploads, deploys |
 | `local_build_fast.sh` | Local build wrapper (copies to native filesystem for speed) |
 | `local_build.sh` | Core build logic (installs deps, builds Next.js, packages artifact) |
