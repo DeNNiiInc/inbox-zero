@@ -46,7 +46,11 @@ ${formatCategoriesForPrompt(categories)}
 6. Return your response in JSON format.
 </instructions>`;
 
-  const modelOptions = getModel(emailAccount.user);
+  import { getOptimizedUserAI } from "@/utils/ai/provider-optimization";
+
+  const modelOptions = getModel(
+    getOptimizedUserAI(emailAccount.user, emailAccount.account?.provider),
+  );
 
   const generateObject = createGenerateObject({
     emailAccount,

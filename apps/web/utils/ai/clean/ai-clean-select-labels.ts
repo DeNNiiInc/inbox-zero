@@ -27,7 +27,11 @@ Return the labels as an array of strings in JSON format.`;
 ${instructions}
 </instructions>`.trim();
 
-  const modelOptions = getModel(emailAccount.user);
+  import { getOptimizedUserAI } from "@/utils/ai/provider-optimization";
+
+  const modelOptions = getModel(
+    getOptimizedUserAI(emailAccount.user, emailAccount.account?.provider),
+  );
 
   const generateObject = createGenerateObject({
     emailAccount,
