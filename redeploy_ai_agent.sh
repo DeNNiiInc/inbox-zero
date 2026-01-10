@@ -126,16 +126,37 @@ fi
 OLLAMA_BASE_URL=$(php -r "include '$SECRETS_FILE'; global \$ollama_base_url; echo \$ollama_base_url ?? '';")
 OLLAMA_API_KEY=$(php -r "include '$SECRETS_FILE'; global \$ollama_api_key; echo \$ollama_api_key ?? '';")
 OLLAMA_MODEL=$(php -r "include '$SECRETS_FILE'; global \$ollama_model; echo \$ollama_model ?? '';")
-OLLAMA_PROVIDER=$(php -r "include '$SECRETS_FILE'; global \$default_llm_provider; echo \$default_llm_provider ?? '';")
+OLLAMA_PROVIDER=$(php -r "include '$SECRETS_FILE'; global \$default_llm_provider; echo \$secrets['default_llm_provider'] ?? \$default_llm_provider ?? '';")
+
+# Standard LLM Defaults
+DEFAULT_LLM_PROVIDER=$(php -r "include '$SECRETS_FILE'; echo \$secrets['default_llm_provider'] ?? '';")
+DEFAULT_LLM_MODEL=$(php -r "include '$SECRETS_FILE'; echo \$secrets['default_llm_model'] ?? '';")
+CHAT_LLM_PROVIDER=$(php -r "include '$SECRETS_FILE'; echo \$secrets['chat_llm_provider'] ?? '';")
+CHAT_LLM_MODEL=$(php -r "include '$SECRETS_FILE'; echo \$secrets['chat_llm_model'] ?? '';")
+ECONOMY_LLM_PROVIDER=$(php -r "include '$SECRETS_FILE'; echo \$secrets['economy_llm_provider'] ?? '';")
+ECONOMY_LLM_MODEL=$(php -r "include '$SECRETS_FILE'; echo \$secrets['economy_llm_model'] ?? '';")
+
+# API Keys (Support both $secrets array and legacy globals)
+OPENAI_API_KEY=$(php -r "include '$SECRETS_FILE'; global \$openai_api_key; echo \$secrets['openai_api_key'] ?? \$openai_api_key ?? '';")
+ANTHROPIC_API_KEY=$(php -r "include '$SECRETS_FILE'; global \$anthropic_api_key; echo \$secrets['anthropic_api_key'] ?? \$anthropic_api_key ?? '';")
+OPENROUTER_API_KEY=$(php -r "include '$SECRETS_FILE'; global \$openrouter_key; echo \$secrets['openrouter_api_key'] ?? \$openrouter_key ?? '';")
 
 if [ ! -z "$OLLAMA_API_KEY" ]; then
     echo "[Step 3b/4] Injecting Ollama credentials..."
     sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "cd $PROJECT_PATH/apps/web && touch .env && sed -i '/OLLAMA_BASE_URL/d' .env && sed -i '/OLLAMA_API_KEY/d' .env && sed -i '/OLLAMA_MODEL/d' .env && echo 'OLLAMA_BASE_URL=\"$OLLAMA_BASE_URL\"' >> .env && echo 'OLLAMA_API_KEY=\"$OLLAMA_API_KEY\"' >> .env && echo 'OLLAMA_MODEL=\"$OLLAMA_MODEL\"' >> .env"
-    
-    # If using Ollama as default, uncomment/set DEFAULT_LLM_PROVIDER
-    # (Optional: user can change this via UI now, so maybe we don't force it? 
-    #  Task 223 said defaults were restored. So we should NOT set DEFAULT_LLM_PROVIDER to ollama unless explicit.)
 fi
+
+echo "[Step 3c/4] Injecting Main LLM Defaults & Keys..."
+sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "cd $PROJECT_PATH/apps/web && touch .env \
+&& sed -i '/DEFAULT_LLM_PROVIDER/d' .env && echo 'DEFAULT_LLM_PROVIDER=\"$DEFAULT_LLM_PROVIDER\"' >> .env \
+&& sed -i '/DEFAULT_LLM_MODEL/d' .env && echo 'DEFAULT_LLM_MODEL=\"$DEFAULT_LLM_MODEL\"' >> .env \
+&& sed -i '/CHAT_LLM_PROVIDER/d' .env && echo 'CHAT_LLM_PROVIDER=\"$CHAT_LLM_PROVIDER\"' >> .env \
+&& sed -i '/CHAT_LLM_MODEL/d' .env && echo 'CHAT_LLM_MODEL=\"$CHAT_LLM_MODEL\"' >> .env \
+&& sed -i '/ECONOMY_LLM_PROVIDER/d' .env && echo 'ECONOMY_LLM_PROVIDER=\"$ECONOMY_LLM_PROVIDER\"' >> .env \
+&& sed -i '/ECONOMY_LLM_MODEL/d' .env && echo 'ECONOMY_LLM_MODEL=\"$ECONOMY_LLM_MODEL\"' >> .env \
+&& sed -i '/OPENAI_API_KEY/d' .env && echo 'OPENAI_API_KEY=\"$OPENAI_API_KEY\"' >> .env \
+&& sed -i '/ANTHROPIC_API_KEY/d' .env && echo 'ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"' >> .env \
+&& sed -i '/OPENROUTER_API_KEY/d' .env && echo 'OPENROUTER_API_KEY=\"$OPENROUTER_API_KEY\"' >> .env"
 
 sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "bash /root/deploy_build.sh"
 if [ $? -ne 0 ]; then

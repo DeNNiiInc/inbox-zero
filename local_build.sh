@@ -5,14 +5,18 @@ set -e
 echo "Starting local build procedure..."
 
 # 1. Setup Node 22 (Local user space)
-if [ ! -d "node-v22.12.0-linux-x64" ]; then
-    echo "Downloading Node.js v22..."
-    curl -fO https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz
-    tar -xf node-v22.12.0-linux-x64.tar.xz
+# Only download if not present in system
+if ! command -v node &> /dev/null; then
+    if [ ! -d "node-v22.12.0-linux-x64" ]; then
+        echo "Downloading Node.js v22..."
+        # Warning: This linux binary won't work on Mac. Assuming system node is present on Mac.
+        curl -fO https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-x64.tar.xz
+        tar -xf node-v22.12.0-linux-x64.tar.xz
+    fi
+    # Add to PATH
+    export PATH="$(pwd)/node-v22.12.0-linux-x64/bin:$PATH"
 fi
 
-# Add to PATH
-export PATH="$(pwd)/node-v22.12.0-linux-x64/bin:$PATH"
 echo "Using Node: $(node -v)"
 
 # 2. Install pnpm standalone
@@ -20,7 +24,14 @@ echo "Installing pnpm standalone..."
 export PNPM_HOME="$HOME/.local/share/pnpm"
 export PATH="$PNPM_HOME:$PATH"
 if ! command -v pnpm &> /dev/null; then
-    wget -qO- https://get.pnpm.io/install.sh | ENV="$HOME/.bashrc" SHELL="$(which bash)" bash -
+    # Try Homebrew pnpm first if available
+    if [ -f "/opt/homebrew/bin/pnpm" ]; then
+        export PATH="/opt/homebrew/bin:$PATH"
+    elif [ -f "/usr/local/bin/pnpm" ]; then
+        export PATH="/usr/local/bin:$PATH"
+    else
+        wget -qO- https://get.pnpm.io/install.sh | ENV="$HOME/.bashrc" SHELL="$(which bash)" bash -
+    fi
 fi
 # Re-source or ensure path
 export PATH="$PNPM_HOME:$PATH"
@@ -40,7 +51,11 @@ pnpm prisma generate
 
 # 4.5 Patch package.json to skip migration during build
 echo "Patching package.json to skip DB migration..."
-sed -i 's/prisma migrate deploy && //g' package.json
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' 's/prisma migrate deploy && //g' package.json
+else
+    sed -i 's/prisma migrate deploy && //g' package.json
+fi
 
 # 5. Build
 echo "Building application..."
