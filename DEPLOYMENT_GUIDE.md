@@ -62,10 +62,8 @@ npm install -g pnpm
 # Install PostgreSQL
 apt install -y postgresql postgresql-contrib
 
-# Install Redis
-apt install -y redis-server
-systemctl enable redis-server
-systemctl start redis-server
+# Install Redis (Optional - for debugging)
+# apt install -y redis-tools
 
 # Install other dependencies
 apt install -y git openssl
@@ -228,8 +226,9 @@ NODE_ENV=production
 DATABASE_URL="postgresql://postgres:password@localhost:5432/inboxzero?schema=public"
 DIRECT_URL="postgresql://postgres:password@localhost:5432/inboxzero?schema=public"
 
-# Redis (Local - using ioredis fork)
-REDIS_URL="redis://localhost:6379"
+# Redis (Upstash)
+UPSTASH_REDIS_URL="https://your-database.upstash.io"
+UPSTASH_REDIS_TOKEN="your-upstash-token"
 
 # AI Providers (2026 Configuration)
 DEFAULT_LLM_PROVIDER="openai"

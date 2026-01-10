@@ -85,6 +85,12 @@ $secrets['economy_llm_provider'] = 'openai';
 $secrets['economy_llm_model']    = 'gpt-5-mini';   // Background tasks
 
 // ==========================================
+// REDIS (Upstash)
+// ==========================================
+$secrets['upstash_redis_url']   = 'https://example-12345.upstash.io';
+$secrets['upstash_redis_token'] = 'your_upstash_token_here';
+
+// ==========================================
 // QSTASH (Background Jobs)
 // ==========================================
 // Get from: https://console.upstash.com/ > QStash

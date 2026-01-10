@@ -23,11 +23,11 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt-get install -y nodejs
 npm install -g pnpm
 
-# 3. Install Redis
-echo -e "${GREEN}Installing Redis...${NC}"
-apt-get install -y redis-server
-systemctl enable redis-server
-systemctl start redis-server
+# 3. Install Redis (Skipped - Using Upstash)
+# echo -e "${GREEN}Installing Redis...${NC}"
+# apt-get install -y redis-server
+# systemctl enable redis-server
+# systemctl start redis-server
 
 # 4. Install PostgreSQL (if not exists)
 if ! command -v psql &> /dev/null; then
@@ -70,8 +70,7 @@ fi
 
 if [ ! -f "apps/web/.env" ]; then
     echo "apps/web/.env file not found! Please copy it manually or via scp."
-    # We create a placeholder if missing just to allow script to proceed if intent is 2-step
-    # but preferably we want it real.
+    echo "IMPORTANT: Ensure .env contains UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN"
     # exit 1 
 fi
 
