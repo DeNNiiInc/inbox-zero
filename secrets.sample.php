@@ -15,6 +15,17 @@ global $secrets;
 $secrets = [];
 
 // ==========================================
+//  MAC OS SETUP INSTRUCTIONS
+// ==========================================
+// 1. Install Homebrew (Package Manager):
+//    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+//
+// 2. Install Required Tools for Deployment:
+//    brew install php sshpass node pnpm
+// ==========================================
+
+
+// ==========================================
 // SSH SERVER CREDENTIALS
 // ==========================================
 // Used by redeploy_ai_agent.sh for automated deployments
