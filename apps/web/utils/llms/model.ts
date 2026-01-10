@@ -147,13 +147,22 @@ function selectModel(
       };
     }
     case "ollama": {
-      const modelName = env.OLLAMA_MODEL;
+      const modelName = aiModel || env.OLLAMA_MODEL;
       if (!modelName)
         throw new Error("OLLAMA_MODEL environment variable is not set");
+
+      const headers: Record<string, string> = {};
+      if (env.OLLAMA_API_KEY) {
+        headers.Authorization = `Bearer ${env.OLLAMA_API_KEY}`;
+      }
+
       return {
         provider: Provider.OLLAMA,
         modelName,
-        model: createOllama({ baseURL: env.OLLAMA_BASE_URL })(modelName),
+        model: createOllama({
+          baseURL: env.OLLAMA_BASE_URL,
+          headers,
+        })(modelName),
         backupModel: null,
       };
     }

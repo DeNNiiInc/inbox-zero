@@ -130,22 +130,22 @@ function ModelSectionForm(props: {
               error={errors.aiModel}
             />
           ) : (
+          <Input
+            type="text"
+            name="aiModel"
+            label="Model"
+            registerProps={register("aiModel")}
+            error={errors.aiModel}
+          />
+          {watch("aiProvider") !== Provider.OLLAMA && (
             <Input
-              type="text"
-              name="aiModel"
-              label="Model"
-              registerProps={register("aiModel")}
-              error={errors.aiModel}
+              type="password"
+              name="aiApiKey"
+              label="API Key"
+              registerProps={register("aiApiKey")}
+              error={errors.aiApiKey}
             />
           )}
-
-          <Input
-            type="password"
-            name="aiApiKey"
-            label="API Key"
-            registerProps={register("aiApiKey")}
-            error={errors.aiApiKey}
-          />
         </>
       )}
 

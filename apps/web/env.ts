@@ -61,6 +61,7 @@ export const env = createEnv({
     PERPLEXITY_API_KEY: z.string().optional(),
     OLLAMA_BASE_URL: z.string().optional(),
     OLLAMA_MODEL: z.string().optional(),
+    OLLAMA_API_KEY: z.string().optional(),
 
     OPENAI_ZERO_DATA_RETENTION: z.coerce.boolean().optional().default(false),
 
