@@ -19,4 +19,5 @@ export const providerOptions: { label: string; value: string }[] = [
   { label: "Groq", value: Provider.GROQ },
   { label: "OpenRouter", value: Provider.OPENROUTER },
   { label: "AI Gateway", value: Provider.AI_GATEWAY },
+  { label: "Ollama", value: Provider.OLLAMA },
 ];
