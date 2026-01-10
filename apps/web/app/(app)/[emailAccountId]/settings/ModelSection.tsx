@@ -137,6 +137,8 @@ function ModelSectionForm(props: {
             registerProps={register("aiModel")}
             error={errors.aiModel}
           />
+          )}
+
           {watch("aiProvider") !== Provider.OLLAMA && (
             <Input
               type="password"
