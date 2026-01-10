@@ -122,6 +122,21 @@ if [ ! -z "$UPSTASH_URL" ]; then
     sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "cd $PROJECT_PATH/apps/web && touch .env && sed -i '/UPSTASH_REDIS_URL/d' .env && sed -i '/UPSTASH_REDIS_TOKEN/d' .env && echo 'UPSTASH_REDIS_URL=\"$UPSTASH_URL\"' >> .env && echo 'UPSTASH_REDIS_TOKEN=\"$UPSTASH_TOKEN\"' >> .env"
 fi
 
+# Inject Ollama Credentials
+OLLAMA_BASE_URL=$(php -r "include '$SECRETS_FILE'; global \$ollama_base_url; echo \$ollama_base_url ?? '';")
+OLLAMA_API_KEY=$(php -r "include '$SECRETS_FILE'; global \$ollama_api_key; echo \$ollama_api_key ?? '';")
+OLLAMA_MODEL=$(php -r "include '$SECRETS_FILE'; global \$ollama_model; echo \$ollama_model ?? '';")
+OLLAMA_PROVIDER=$(php -r "include '$SECRETS_FILE'; global \$default_llm_provider; echo \$default_llm_provider ?? '';")
+
+if [ ! -z "$OLLAMA_API_KEY" ]; then
+    echo "[Step 3b/4] Injecting Ollama credentials..."
+    sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "cd $PROJECT_PATH/apps/web && touch .env && sed -i '/OLLAMA_BASE_URL/d' .env && sed -i '/OLLAMA_API_KEY/d' .env && sed -i '/OLLAMA_MODEL/d' .env && echo 'OLLAMA_BASE_URL=\"$OLLAMA_BASE_URL\"' >> .env && echo 'OLLAMA_API_KEY=\"$OLLAMA_API_KEY\"' >> .env && echo 'OLLAMA_MODEL=\"$OLLAMA_MODEL\"' >> .env"
+    
+    # If using Ollama as default, uncomment/set DEFAULT_LLM_PROVIDER
+    # (Optional: user can change this via UI now, so maybe we don't force it? 
+    #  Task 223 said defaults were restored. So we should NOT set DEFAULT_LLM_PROVIDER to ollama unless explicit.)
+fi
+
 sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "bash /root/deploy_build.sh"
 if [ $? -ne 0 ]; then
     echo "Remote deployment failed."
