@@ -87,20 +87,20 @@ remote_env_file
 # ==========================================
 # DEPLOYMENT SCRIPTS (may contain paths/logic)
 # ==========================================
-redeploy_ai_agent.sh
-local_build.sh
-local_build_fast.sh
-remote_build.sh
-remote_build_low_mem.sh
-remote_deploy.sh
-remote_start.sh
-deploy_build.sh
-restart_app.sh
-start_app.sh
-startup_app.sh
-finalize_deploy.sh
-setup_swap.sh
-generate_env.sh
+# redeploy_ai_agent.sh
+# local_build.sh
+# local_build_fast.sh
+# remote_build.sh
+# remote_build_low_mem.sh
+# remote_deploy.sh
+# remote_start.sh
+# deploy_build.sh
+# restart_app.sh
+# start_app.sh
+# startup_app.sh
+# finalize_deploy.sh
+# setup_swap.sh
+# generate_env.sh
 
 # ==========================================
 # DEPLOYMENT ARTIFACTS

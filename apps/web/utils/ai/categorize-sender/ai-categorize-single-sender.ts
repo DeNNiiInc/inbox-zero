@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { EmailAccountWithAI } from "@/utils/llms/types";
 import type { Category } from "@/generated/prisma/client";
+import { getOptimizedUserAI } from "@/utils/ai/provider-optimization";
 import { formatCategoriesForPrompt } from "@/utils/ai/categorize-sender/format-categories";
 import { getModel } from "@/utils/llms/model";
 import { createGenerateObject } from "@/utils/llms";
@@ -46,7 +47,7 @@ ${formatCategoriesForPrompt(categories)}
 6. Return your response in JSON format.
 </instructions>`;
 
-  import { getOptimizedUserAI } from "@/utils/ai/provider-optimization";
+
 
   const modelOptions = getModel(
     getOptimizedUserAI(emailAccount.user, emailAccount.account?.provider),

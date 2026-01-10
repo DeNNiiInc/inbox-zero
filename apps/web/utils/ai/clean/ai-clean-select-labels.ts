@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { EmailAccountWithAI } from "@/utils/llms/types";
 import { getModel } from "@/utils/llms/model";
+import { getOptimizedUserAI } from "@/utils/ai/provider-optimization";
 import { createGenerateObject } from "@/utils/llms";
 
 const schema = z.object({ labels: z.array(z.string()).optional() });
@@ -27,7 +28,7 @@ Return the labels as an array of strings in JSON format.`;
 ${instructions}
 </instructions>`.trim();
 
-  import { getOptimizedUserAI } from "@/utils/ai/provider-optimization";
+
 
   const modelOptions = getModel(
     getOptimizedUserAI(emailAccount.user, emailAccount.account?.provider),
