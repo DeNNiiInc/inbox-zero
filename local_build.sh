@@ -57,16 +57,6 @@ else
     sed -i 's/prisma migrate deploy && //g' package.json
 fi
 
-# 4.6 Inject git version info
-echo "Injecting git version info..."
-cd ../..
-GIT_COMMIT_SHORT=$(git log -1 --format="%h" | cut -c1-10)
-GIT_COMMIT_DATE=$(git log -1 --format="%ci")
-cd apps/web
-echo "NEXT_PUBLIC_GIT_COMMIT=$GIT_COMMIT_SHORT" >> .env
-echo "NEXT_PUBLIC_GIT_DATE=$GIT_COMMIT_DATE" >> .env
-echo "Git version: $GIT_COMMIT_SHORT ($GIT_COMMIT_DATE)"
-
 # 5. Build
 echo "Building application..."
 # We need to ensure we don't have memory issues locally either.
