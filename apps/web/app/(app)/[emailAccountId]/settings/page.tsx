@@ -8,6 +8,7 @@ import { MultiAccountSection } from "@/app/(app)/[emailAccountId]/settings/Multi
 import { ResetAnalyticsSection } from "@/app/(app)/[emailAccountId]/settings/ResetAnalyticsSection";
 import { RuleImportExportSetting } from "@/app/(app)/[emailAccountId]/assistant/settings/RuleImportExportSetting";
 import { WebhookSection } from "@/app/(app)/[emailAccountId]/settings/WebhookSection";
+import { VersionSection } from "@/app/(app)/[emailAccountId]/settings/VersionSection";
 import { FormSection, FormWrapper } from "@/components/Form";
 import { PageHeader } from "@/components/PageHeader";
 import { TabsToolbar } from "@/components/TabsToolbar";
@@ -37,6 +38,7 @@ export default function SettingsPage() {
 
         <TabsContent value="user">
           <FormWrapper>
+            <VersionSection />
             {!env.NEXT_PUBLIC_BYPASS_PREMIUM_CHECKS && (
               <>
                 <MultiAccountSection />
