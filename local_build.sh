@@ -71,8 +71,8 @@ if [ -d ".next/standalone" ]; then
     cd ../..
     tar -czf deployment.tar.gz -C apps/web/.next/standalone .
 else
-    echo "Standard build detected. Packaging .next + node_modules..."
-    tar -czf ../../deployment.tar.gz .next public package.json node_modules
+    echo "Standard build detected. Packaging .next + node_modules + prisma..."
+    tar -czf ../../deployment.tar.gz .next public package.json node_modules prisma generated prisma.config.ts
     cd ../..
 fi
 
