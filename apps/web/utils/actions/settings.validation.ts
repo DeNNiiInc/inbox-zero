@@ -32,17 +32,12 @@ export const saveAiSettingsBody = z
       Provider.GOOGLE,
       Provider.GROQ,
       Provider.OPENROUTER,
-      Provider.OLLAMA,
     ]),
     aiModel: z.string(),
     aiApiKey: z.string().optional(),
   })
   .superRefine((val, ctx) => {
-    if (
-      !val.aiApiKey &&
-      val.aiProvider !== DEFAULT_PROVIDER &&
-      val.aiProvider !== Provider.OLLAMA
-    ) {
+    if (!val.aiApiKey && val.aiProvider !== DEFAULT_PROVIDER) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "You must provide an API key for this provider",
@@ -56,3 +51,8 @@ export const updateDigestItemsBody = z.object({
   ruleDigestPreferences: z.record(z.string(), z.boolean()),
 });
 export type UpdateDigestItemsBody = z.infer<typeof updateDigestItemsBody>;
+
+export const toggleDigestBody = z.object({
+  enabled: z.boolean(),
+});
+export type ToggleDigestBody = z.infer<typeof toggleDigestBody>;

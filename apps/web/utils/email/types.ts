@@ -127,6 +127,7 @@ export interface EmailProvider {
       threadId: string;
       headerMessageId: string;
       references?: string;
+      messageId?: string; // Platform-specific message ID (Graph ID for Outlook)
     };
     to: string;
     cc?: string;
@@ -177,6 +178,13 @@ export interface EmailProvider {
     pageToken?: string;
     before?: Date;
     after?: Date;
+  }): Promise<{
+    messages: ParsedMessage[];
+    nextPageToken?: string;
+  }>;
+  getMessagesWithAttachments(options: {
+    maxResults?: number;
+    pageToken?: string;
   }): Promise<{
     messages: ParsedMessage[];
     nextPageToken?: string;

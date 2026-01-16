@@ -5,6 +5,7 @@ import {
   getMessage,
   getMessages,
   queryBatchMessages,
+  queryMessagesWithAttachments,
   getFolderIds,
   convertMessage,
   MESSAGE_SELECT_FIELDS,
@@ -445,11 +446,15 @@ export class OutlookProvider implements EmailProvider {
     }
 
     // Get current message categories to avoid replacing them
-    const message = await this.client
-      .getClient()
-      .api(`/me/messages/${messageId}`)
-      .select("categories")
-      .get();
+    const message = await withOutlookRetry(
+      () =>
+        this.client
+          .getClient()
+          .api(`/me/messages/${messageId}`)
+          .select("categories")
+          .get(),
+      this.logger,
+    );
 
     const currentCategories = message.categories || [];
 
@@ -932,6 +937,20 @@ export class OutlookProvider implements EmailProvider {
       messages: response.messages || [],
       nextPageToken: response.nextPageToken,
     };
+  }
+
+  async getMessagesWithAttachments(options: {
+    maxResults?: number;
+    pageToken?: string;
+  }): Promise<{ messages: ParsedMessage[]; nextPageToken?: string }> {
+    return queryMessagesWithAttachments(
+      this.client,
+      {
+        maxResults: options.maxResults,
+        pageToken: options.pageToken,
+      },
+      this.logger,
+    );
   }
 
   async getMessagesFromSender(options: {

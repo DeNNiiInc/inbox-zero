@@ -1,10 +1,14 @@
 "use client";
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState } from "react";
 import useSWR from "swr";
 import { parseAsBoolean, useQueryState } from "nuqs";
 import { AutoCategorizationSetup } from "@/app/(app)/[emailAccountId]/bulk-archive/AutoCategorizationSetup";
 import { BulkArchiveProgress } from "@/app/(app)/[emailAccountId]/bulk-archive/BulkArchiveProgress";
+import {
+  BulkArchiveSettingsModal,
+  type BulkActionType,
+} from "@/app/(app)/[emailAccountId]/bulk-archive/BulkArchiveSettingsModal";
 import { BulkArchiveCards } from "@/components/BulkArchiveCards";
 import { useCategorizeProgress } from "@/app/(app)/[emailAccountId]/smart-categories/CategorizeProgress";
 import { CategorizeWithAiButton } from "@/app/(app)/[emailAccountId]/smart-categories/CategorizeWithAiButton";
@@ -17,6 +21,7 @@ import { PageHeading } from "@/components/Typography";
 export function BulkArchive() {
   const { isBulkCategorizing } = useCategorizeProgress();
   const [onboarding] = useQueryState("onboarding", parseAsBoolean);
+  const [bulkAction, setBulkAction] = useState<BulkActionType>("archive");
 
   // Fetch data with SWR and poll while categorization is in progress
   const { data, error, isLoading, mutate } = useSWR<CategorizedSendersResponse>(
@@ -44,9 +49,12 @@ export function BulkArchive() {
     mutate();
   }, [mutate]);
 
+  const [setupDismissed, setSetupDismissed] = useState(false);
+
   // Show setup dialog for first-time setup only
   const shouldShowSetup =
-    onboarding || (!autoCategorizeSenders && !isBulkCategorizing);
+    !setupDismissed &&
+    (onboarding || (!autoCategorizeSenders && !isBulkCategorizing));
 
   return (
     <LoadingContent loading={isLoading} error={error}>
@@ -56,14 +64,30 @@ export function BulkArchive() {
             <PageHeading>Bulk Archive</PageHeading>
             <TooltipExplanation text="Archive emails in bulk by category to quickly clean up your inbox." />
           </div>
-          <CategorizeWithAiButton
-            buttonProps={{ variant: "outline", size: "sm" }}
-          />
+          <div className="flex items-center gap-2">
+            <BulkArchiveSettingsModal
+              selectedAction={bulkAction}
+              onActionChange={setBulkAction}
+            />
+            <CategorizeWithAiButton
+              buttonProps={{ variant: "outline", size: "sm" }}
+            />
+          </div>
         </div>
         <BulkArchiveProgress onComplete={handleProgressComplete} />
-        <BulkArchiveCards emailGroups={emailGroups} categories={categories} />
+        <BulkArchiveCards
+          emailGroups={emailGroups}
+          categories={categories}
+          bulkAction={bulkAction}
+          onCategoryChange={mutate}
+        />
       </PageWrapper>
-      <AutoCategorizationSetup open={shouldShowSetup} />
+      <AutoCategorizationSetup
+        open={shouldShowSetup}
+        onOpenChange={(open) => {
+          if (!open) setSetupDismissed(true);
+        }}
+      />
     </LoadingContent>
   );
 }
