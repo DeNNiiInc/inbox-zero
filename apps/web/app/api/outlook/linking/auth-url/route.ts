@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { withAuth } from "@/utils/middleware";
 import { getLinkingOAuth2Url } from "@/utils/outlook/client";
 import { OUTLOOK_LINKING_STATE_COOKIE_NAME } from "@/utils/outlook/constants";
@@ -25,18 +26,18 @@ const getAuthUrl = ({
 };
 
 export const GET = withAuth("outlook/linking/auth-url", async (request) => {
+  const req = request as any;
   const userId = request.auth.userId;
-  const sharedMailboxAddress =
-    request.nextUrl.searchParams.get("sharedMailboxAddress");
+  const urlObj = new URL(req.url);
+  const sharedMailboxAddress = urlObj.searchParams.get("sharedMailboxAddress");
   const { url: authUrl, state } = getAuthUrl({ userId, sharedMailboxAddress });
 
-  const response = NextResponse.json({ url: authUrl });
-
-  response.cookies.set(
+  const cookieStore = await cookies();
+  cookieStore.set(
     OUTLOOK_LINKING_STATE_COOKIE_NAME,
     state,
     oauthStateCookieOptions,
   );
 
-  return response;
+  return NextResponse.json({ url: authUrl });
 });
