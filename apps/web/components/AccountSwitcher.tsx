@@ -2,7 +2,6 @@
 
 import { useCallback } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { ChevronsUpDown, Plus } from "lucide-react";
 import {
   DropdownMenu,
@@ -138,16 +137,19 @@ export function AccountSwitcherInternal({
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
-            <Link href="/accounts">
-              <DropdownMenuItem className="gap-2 p-2">
-                <div className="flex size-6 items-center justify-center rounded-md border bg-background">
-                  <Plus className="size-4" />
-                </div>
-                <div className="font-medium text-muted-foreground">
-                  Add or manage accounts
-                </div>
-              </DropdownMenuItem>
-            </Link>
+            <DropdownMenuItem 
+              className="gap-2 p-2"
+              onSelect={() => {
+                window.location.href = "/accounts";
+              }}
+            >
+              <div className="flex size-6 items-center justify-center rounded-md border bg-background">
+                <Plus className="size-4" />
+              </div>
+              <div className="font-medium text-muted-foreground">
+                Add or manage accounts
+              </div>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
