@@ -721,7 +721,6 @@ export class OutlookProvider implements EmailProvider {
     const [allLabels, messages] = await Promise.all([
       this.getLabels(),
       this.client
-        .getClient()
         .api("/messages")
         .filter(`conversationId eq '${escapeODataString(threadId)}'`)
         .select("id,categories")
