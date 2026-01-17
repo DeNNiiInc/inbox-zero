@@ -2,7 +2,7 @@
 
 import { useAction } from "next-safe-action/hooks";
 import Link from "next/link";
-import { Trash2, MoreVertical, Settings, ArrowLeftRight } from "lucide-react";
+import { Trash2, MoreVertical, Settings, ArrowLeftRight, MailPlus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -20,6 +20,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/Input";
 import { useAccounts } from "@/hooks/useAccounts";
 import { deleteEmailAccountAction } from "@/utils/actions/user";
 import { toastSuccess, toastError } from "@/components/Toast";
@@ -152,7 +161,11 @@ function AccountOptionsDropdown({
   emailAccount: {
     id: string;
     email: string;
+    image: string | null;
     isPrimary: boolean;
+    account: {
+      provider: string;
+    };
   };
   allAccounts: Array<{
     id: string;
@@ -164,6 +177,9 @@ function AccountOptionsDropdown({
   onAccountDeleted: () => void;
 }) {
   const [copyRulesDialogOpen, setCopyRulesDialogOpen] = useState(false);
+  const [sharedMailboxDialogOpen, setSharedMailboxDialogOpen] = useState(false);
+  const [sharedMailboxEmail, setSharedMailboxEmail] = useState("");
+  const [isLinking, setIsLinking] = useState(false);
 
   const { execute, isExecuting } = useAction(deleteEmailAccountAction, {
     onSuccess: async () => {
@@ -176,14 +192,26 @@ function AccountOptionsDropdown({
         await logOut("/login");
       }
     },
-    onError: (error) => {
-      toastError({
-        title: "Error deleting email account",
-        description: getActionErrorMessage(error.error),
-      });
-      onAccountDeleted();
-    },
   });
+
+  const handleAddSharedMailbox = async () => {
+    if (!sharedMailboxEmail) return;
+    setIsLinking(true);
+    try {
+      const { getAccountLinkingUrl } = await import("@/utils/account-linking");
+      const url = await getAccountLinkingUrl("microsoft", sharedMailboxEmail);
+      window.location.href = url;
+    } catch (error) {
+      console.error("Error initiating shared mailbox link:", error);
+      toastError({
+        title: "Error",
+        description: "Failed to initiate account linking.",
+      });
+      setIsLinking(false);
+    }
+  };
+
+  const isMicrosoft = emailAccount.account.provider === "microsoft";
 
   const sourceAccounts = allAccounts.filter(
     (account) => account.id !== emailAccount.id,
@@ -208,6 +236,18 @@ function AccountOptionsDropdown({
               Setup
             </Link>
           </DropdownMenuItem>
+          {isMicrosoft && (
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e?.stopPropagation?.();
+                setSharedMailboxDialogOpen(true);
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <MailPlus className="size-4" />
+              Add shared mailbox
+            </DropdownMenuItem>
+          )}
           {sourceAccounts.length > 0 && (
             <DropdownMenuItem
               onSelect={(e) => {
@@ -256,6 +296,43 @@ function AccountOptionsDropdown({
         targetAccountEmail={emailAccount.email}
         sourceAccounts={sourceAccounts}
       />
+
+      <Dialog
+        open={sharedMailboxDialogOpen}
+        onOpenChange={setSharedMailboxDialogOpen}
+      >
+        <DialogContent onClick={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle>Add Shared Mailbox</DialogTitle>
+            <DialogDescription>
+              Enter the email address of the shared mailbox you want to access
+              using the credentials of {emailAccount.email}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              type="email"
+              placeholder="shared-mailbox@company.com"
+              registerProps={{
+                value: sharedMailboxEmail,
+                onChange: (e: any) => setSharedMailboxEmail(e.target.value),
+              }}
+              className="w-full"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setSharedMailboxDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleAddSharedMailbox} disabled={isLinking}>
+              {isLinking ? "Redirecting..." : "Add Mailbox"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
