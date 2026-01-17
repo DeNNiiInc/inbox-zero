@@ -238,9 +238,16 @@ export function BulkProcessControl({ emailAccountId }: BulkProcessControlProps) 
                 <div className="flex items-center gap-1">
                    <span className="font-medium text-foreground">{processedCount}</span> processed
                 </div>
-                <div className="flex items-center gap-1">
-                   <span className="font-medium text-red-500">{errorCount}</span> errors
-                </div>
+                <div className="flex justify-between text-sm text-gray-500 mb-2">
+          <div className="text-right">
+            <span className={job.errorCount > 0 ? "text-red-500" : ""}>{job.errorCount} errors</span>
+            {job.errorCount > 0 && job.lastError && (
+              <div className="text-xs text-red-500 mt-1 max-w-[300px] truncate" title={job.lastError}>
+                Error: {job.lastError}
+              </div>
+            )}
+          </div>
+        </div>
               </div>
 
               <CardFooter className="px-0 pt-4 flex justify-between">
