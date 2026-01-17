@@ -21,6 +21,10 @@ tar -xzf deployment.tar.gz -C apps/web
 # Restore .env
 cp /tmp/.env.backup apps/web/.env 2>/dev/null || true
 
+# Run database migrations
+echo "Running database migrations..."
+npx prisma db push --accept-data-loss
+
 # Start the application using pnpm start
 echo "Starting application..."
 cd apps/web
