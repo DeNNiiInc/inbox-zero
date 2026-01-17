@@ -18,6 +18,7 @@ const calendarOAuthStateSchema = z.object({
   emailAccountId: z.string().min(1).max(64),
   type: z.literal("calendar"),
   nonce: z.string().min(8).max(128),
+  mailboxAddress: z.string().optional(),
 });
 
 /**

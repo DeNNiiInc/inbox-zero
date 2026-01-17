@@ -88,6 +88,7 @@ export function createMicrosoftCalendarProvider(
       refreshToken: string,
       emailAccountId: string,
       expiresAt: Date | null,
+      mailboxAddress?: string,
     ): Promise<void> {
       try {
         const calendarClient = await getCalendarClientWithRefresh({
@@ -98,9 +99,11 @@ export function createMicrosoftCalendarProvider(
           logger,
         });
 
+        // Pass mailboxAddress to fetch shared mailbox calendars when applicable
         const microsoftCalendars = await fetchMicrosoftCalendars(
           calendarClient,
           logger,
+          mailboxAddress,
         );
 
         for (const microsoftCalendar of microsoftCalendars) {

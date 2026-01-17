@@ -83,7 +83,7 @@ export async function handleCalendarCallback(
       response.headers,
     );
 
-    const { emailAccountId } = decodedState;
+    const { emailAccountId, mailboxAddress } = decodedState;
 
     // Step 3: Update redirect URL to include emailAccountId
     const finalRedirectUrl = buildCalendarRedirectUrl(emailAccountId);
@@ -132,13 +132,14 @@ export async function handleCalendarCallback(
       expiresAt,
     });
 
-    // Step 8: Sync calendars
+    // Step 8: Sync calendars (pass mailboxAddress for shared mailboxes)
     await provider.syncCalendars(
       connection.id,
       accessToken,
       refreshToken,
       emailAccountId,
       expiresAt,
+      mailboxAddress,
     );
 
     logger.info("Calendar connected successfully", {

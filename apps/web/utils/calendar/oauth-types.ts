@@ -24,6 +24,7 @@ export interface CalendarOAuthProvider {
     refreshToken: string,
     emailAccountId: string,
     expiresAt: Date | null,
+    mailboxAddress?: string,
   ): Promise<void>;
 }
 
@@ -37,4 +38,5 @@ export interface CalendarOAuthState {
   emailAccountId: string;
   type: "calendar";
   nonce: string;
+  mailboxAddress?: string;
 }
