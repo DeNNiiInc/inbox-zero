@@ -78,4 +78,6 @@ logs
 
 coverage
 
-/apps/web/app/(app)/\[emailAccountId\]/demo/*
+/apps/web/app/(app)/\[emailAccountId\]/demo/*secrets.php
+deployment.tar.gz
+node-v22.12.0-linux-x64/
