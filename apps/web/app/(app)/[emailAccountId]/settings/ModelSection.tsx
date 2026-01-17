@@ -18,6 +18,7 @@ import type { OpenAiModelsResponse } from "@/app/api/ai/models/route";
 import { AlertBasic, AlertError } from "@/components/Alert";
 import {
   DEFAULT_PROVIDER,
+  PRECONFIGURED_MODELS,
   Provider,
   providerOptions,
 } from "@/utils/llms/config";
@@ -109,7 +110,7 @@ function ModelSectionForm(props: {
           label: m.id,
           value: m.id,
         })) || []
-      : [];
+      : PRECONFIGURED_MODELS.filter((m) => m.provider === aiProvider) || [];
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -130,13 +131,13 @@ function ModelSectionForm(props: {
               error={errors.aiModel}
             />
           ) : (
-          <Input
-            type="text"
-            name="aiModel"
-            label="Model"
-            registerProps={register("aiModel")}
-            error={errors.aiModel}
-          />
+            <Input
+              type="text"
+              name="aiModel"
+              label="Model"
+              registerProps={register("aiModel")}
+              error={errors.aiModel}
+            />
           )}
 
           {watch("aiProvider") !== Provider.OLLAMA && (

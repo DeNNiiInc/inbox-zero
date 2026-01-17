@@ -32,8 +32,7 @@ export async function getOutlookRootFolders(
   const response: { value: MailFolder[] } = await withOutlookRetry(
     () =>
       client
-        .getClient()
-        .api("/me/mailFolders")
+        .api("/mailFolders")
         .select(fields)
         .top(999)
         .expand(
@@ -55,8 +54,7 @@ export async function getOutlookChildFolders(
   const response: { value: MailFolder[] } = await withOutlookRetry(
     () =>
       client
-        .getClient()
-        .api(`/me/mailFolders/${folderId}/childFolders`)
+        .api(`/mailFolders/${folderId}/childFolders`)
         .select(fields)
         .top(999)
         .expand(
@@ -78,8 +76,7 @@ async function findOutlookFolderByName(
     const response: { value: MailFolder[] } = await withOutlookRetry(
       () =>
         client
-          .getClient()
-          .api("/me/mailFolders")
+          .api("/mailFolders")
           .filter(`displayName eq '${folderName.replace(/'/g, "''")}'`)
           .select("id,displayName")
           .top(1)
@@ -183,7 +180,7 @@ export async function getOrCreateOutlookFolderIdByName(
   try {
     const response = await withOutlookRetry(
       () =>
-        client.getClient().api("/me/mailFolders").post({
+        client.api("/mailFolders").post({
           displayName: folderName,
         }),
       logger,

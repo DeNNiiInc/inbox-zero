@@ -39,7 +39,10 @@ export const GET = withError("outlook/linking/callback", async (request) => {
     return validation.response;
   }
 
-  const { targetUserId, code } = validation;
+  const { targetUserId, code, decodedState } = validation;
+  const sharedMailboxAddress = decodedState?.sharedMailboxAddress as
+    | string
+    | undefined;
 
   const cachedResult = await getOAuthCodeResult(code);
   if (cachedResult) {
@@ -113,8 +116,14 @@ export const GET = withError("outlook/linking/callback", async (request) => {
     }
 
     const profile = await profileResponse.json();
-    const providerAccountId = profile.id;
-    const providerEmail = profile.mail || profile.userPrincipalName;
+    const microsoftUserId = profile.id;
+    const providerEmail = sharedMailboxAddress || profile.mail || profile.userPrincipalName;
+    
+    // For shared mailboxes, we combine the primary user ID with the target mailbox email
+    // to allow linking multiple shared mailboxes from the same Microsoft account.
+    const providerAccountId = sharedMailboxAddress 
+      ? `${microsoftUserId}:${sharedMailboxAddress}`
+      : microsoftUserId;
 
     if (!providerAccountId || !providerEmail) {
       throw new Error("Profile missing required id or email");
@@ -212,6 +221,7 @@ export const GET = withError("outlook/linking/callback", async (request) => {
                   profile.surname ||
                   null,
                 image: profileImage,
+                mailboxAddress: sharedMailboxAddress || "me",
               },
             },
           },

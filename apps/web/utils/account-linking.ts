@@ -9,10 +9,19 @@ import { isGoogleProvider } from "@/utils/email/provider-types";
  */
 export async function getAccountLinkingUrl(
   provider: "google" | "microsoft",
+  mailboxAddress?: string,
 ): Promise<string> {
   const apiProvider = provider === "microsoft" ? "outlook" : "google";
 
-  const response = await fetch(`/api/${apiProvider}/linking/auth-url`, {
+  const searchParams = new URLSearchParams();
+  if (mailboxAddress) {
+    searchParams.set("sharedMailboxAddress", mailboxAddress);
+  }
+
+  const query = searchParams.toString();
+  const url = `/api/${apiProvider}/linking/auth-url${query ? `?${query}` : ""}`;
+
+  const response = await fetch(url, {
     method: "GET",
     headers: { "Content-Type": "application/json" },
   });

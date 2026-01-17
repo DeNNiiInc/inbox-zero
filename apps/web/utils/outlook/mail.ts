@@ -64,7 +64,7 @@ export async function sendEmailWithHtml(
 
   await withOutlookRetry(
     () =>
-      client.getClient().api("/me/sendMail").post({
+      client.api("/sendMail").post({
         message,
         saveToSentItems: true,
       }),
@@ -105,7 +105,7 @@ export async function replyToEmail(
   // Only createReply/createReplyAll endpoints ensure proper threading
   const replyDraft: Message = await withOutlookRetry(
     () =>
-      client.getClient().api(`/me/messages/${message.id}/createReply`).post({}),
+      client.api(`/messages/${message.id}/createReply`).post({}),
     logger,
   );
 
@@ -113,8 +113,7 @@ export async function replyToEmail(
   await withOutlookRetry(
     () =>
       client
-        .getClient()
-        .api(`/me/messages/${replyDraft.id}`)
+        .api(`/messages/${replyDraft.id}`)
         .patch({
           body: {
             contentType: "html",
@@ -126,7 +125,7 @@ export async function replyToEmail(
 
   // Send the draft
   await withOutlookRetry(
-    () => client.getClient().api(`/me/messages/${replyDraft.id}/send`).post({}),
+    () => client.api(`/messages/${replyDraft.id}/send`).post({}),
     logger,
   );
 
@@ -154,7 +153,7 @@ export async function forwardEmail(
 
   // Get the original message
   const originalMessage: Message = await withOutlookRetry(
-    () => client.getClient().api(`/me/messages/${options.messageId}`).get(),
+    () => client.api(`/messages/${options.messageId}`).get(),
     logger,
   );
 
@@ -196,8 +195,7 @@ export async function forwardEmail(
   const result = await withOutlookRetry(
     () =>
       client
-        .getClient()
-        .api(`/me/messages/${options.messageId}/forward`)
+        .api(`/messages/${options.messageId}/forward`)
         .post({ message: forwardMessage }),
     logger,
   );
@@ -263,8 +261,7 @@ export async function draftEmail(
   const originalMessage: Message = await withOutlookRetry(
     () =>
       client
-        .getClient()
-        .api(`/me/messages/${originalEmail.id}`)
+        .api(`/messages/${originalEmail.id}`)
         .select("isRead")
         .get(),
     logger,
@@ -276,14 +273,13 @@ export async function draftEmail(
   const replyDraft: Message = await withOutlookRetry(
     () =>
       client
-        .getClient()
-        .api(`/me/messages/${originalEmail.id}/createReplyAll`)
+        .api(`/messages/${originalEmail.id}/createReplyAll`)
         .post({}),
     logger,
   );
 
   // Update the draft with our content
-  const updateRequest = client.getClient().api(`/me/messages/${replyDraft.id}`);
+  const updateRequest = client.api(`/messages/${replyDraft.id}`);
 
   // To handle change key error
   const etag = (replyDraft as { "@odata.etag"?: string })?.["@odata.etag"];
@@ -313,7 +309,7 @@ export async function draftEmail(
       () =>
         client
           .getClient()
-          .api(`/me/messages/${originalEmail.id}`)
+          .api(`/messages/${originalEmail.id}`)
           .patch({ isRead: false }),
       logger,
     );
@@ -353,7 +349,7 @@ async function sendReplyUsingCreateReply(
     () =>
       client
         .getClient()
-        .api(`/me/messages/${originalMessageId}/createReply`)
+        .api(`/messages/${originalMessageId}/createReply`)
         .post({}),
     logger,
   );
@@ -363,7 +359,7 @@ async function sendReplyUsingCreateReply(
     () =>
       client
         .getClient()
-        .api(`/me/messages/${replyDraft.id}`)
+        .api(`/messages/${replyDraft.id}`)
         .patch({
           subject: body.subject,
           body: {
@@ -383,7 +379,7 @@ async function sendReplyUsingCreateReply(
 
   // Send the draft
   await withOutlookRetry(
-    () => client.getClient().api(`/me/messages/${replyDraft.id}/send`).post({}),
+    () => client.api(`/messages/${replyDraft.id}/send`).post({}),
     logger,
   );
 

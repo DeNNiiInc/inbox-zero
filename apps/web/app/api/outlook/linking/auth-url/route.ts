@@ -9,8 +9,14 @@ import {
 
 export type GetOutlookAuthLinkUrlResponse = { url: string };
 
-const getAuthUrl = ({ userId }: { userId: string }) => {
-  const state = generateOAuthState({ userId });
+const getAuthUrl = ({
+  userId,
+  sharedMailboxAddress,
+}: {
+  userId: string;
+  sharedMailboxAddress?: string | null;
+}) => {
+  const state = generateOAuthState({ userId, sharedMailboxAddress });
 
   const baseUrl = getLinkingOAuth2Url();
   const url = `${baseUrl}&state=${state}`;
@@ -20,7 +26,9 @@ const getAuthUrl = ({ userId }: { userId: string }) => {
 
 export const GET = withAuth("outlook/linking/auth-url", async (request) => {
   const userId = request.auth.userId;
-  const { url: authUrl, state } = getAuthUrl({ userId });
+  const sharedMailboxAddress =
+    request.nextUrl.searchParams.get("sharedMailboxAddress");
+  const { url: authUrl, state } = getAuthUrl({ userId, sharedMailboxAddress });
 
   const response = NextResponse.json({ url: authUrl });
 

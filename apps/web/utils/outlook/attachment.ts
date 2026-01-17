@@ -7,8 +7,7 @@ export async function getOutlookAttachment(
   attachmentId: string,
 ) {
   const attachment: FileAttachment = await client
-    .getClient()
-    .api(`/me/messages/${messageId}/attachments/${attachmentId}`)
+    .api(`/messages/${messageId}/attachments/${attachmentId}`)
     .get();
 
   return attachment;

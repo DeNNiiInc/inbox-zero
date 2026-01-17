@@ -121,10 +121,15 @@ async function moveMessagesInBatches({
     const requestId = `${action}-${index}`;
     requestIdToMessageId.set(requestId, messageId);
 
+    const root =
+      client.getMailboxAddress() === "me"
+        ? "/me"
+        : `/users/${client.getMailboxAddress()}`;
+
     return {
       id: requestId,
       method: "POST",
-      url: `/me/messages/${messageId}/move`,
+      url: `${root}/messages/${messageId}/move`,
       headers: {
         "Content-Type": "application/json",
       },
@@ -205,10 +210,9 @@ export async function moveMessagesForSenders({
         // Use the full @odata.nextLink URL for subsequent pages
         return client.getClient().api(url).get();
       }
-      // First page: use fluent API
+      // First page: use my api wrapper
       return client
-        .getClient()
-        .api("/me/messages")
+        .api("/messages")
         .filter(filterExpression)
         .top(100)
         .select("id,conversationId")
