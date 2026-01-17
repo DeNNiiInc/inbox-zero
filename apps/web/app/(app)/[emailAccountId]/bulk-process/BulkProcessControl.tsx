@@ -157,6 +157,12 @@ export function BulkProcessControl({ emailAccountId }: BulkProcessControlProps) 
                 Finished at {new Date(job.completedAt || job.updatedAt || new Date()).toLocaleString()}.
                 <br />
                 Processed {job.processedCount} emails with {job.errorCount} errors.
+                {job.lastError && (
+                  <>
+                    <br />
+                    <span className="font-mono text-xs mt-1 block">Last Error: {job.lastError}</span>
+                  </>
+                )}
               </AlertDescription>
             </Alert>
           )}
