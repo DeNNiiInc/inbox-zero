@@ -7,6 +7,7 @@ export const SCOPES = [
   "profile",
   "email",
   "User.Read",
+  "User.ReadBasic.All", // Required to read shared mailbox display names
   "offline_access", // Required for refresh tokens
   "Mail.ReadWrite", // Read and write access to mailbox
   "Mail.ReadWrite.Shared", // Read and write access to shared mailboxes
