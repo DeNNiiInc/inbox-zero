@@ -20,4 +20,4 @@ export const POST = withEmailAccount("bulk-process/stop", async (request) => {
   await stopBulkProcessing(jobId, request.auth.emailAccountId);
 
   return NextResponse.json({ success: true });
-});
+}, { allowOrgAdmins: true });
