@@ -136,6 +136,7 @@ export const getCalendarClientWithRefresh = async ({
 export async function fetchMicrosoftCalendars(
   calendarClient: Client,
   logger: Logger,
+  mailboxAddress?: string,
 ): Promise<
   Array<{
     id?: string;
@@ -145,14 +146,19 @@ export async function fetchMicrosoftCalendars(
   }>
 > {
   try {
+    // Use /users/{email}/calendars for shared mailboxes, /me/calendars otherwise
+    const apiPath = mailboxAddress && mailboxAddress !== "me"
+      ? `/users/${encodeURIComponent(mailboxAddress)}/calendars`
+      : "/me/calendars";
+    
     const response = await calendarClient
-      .api("/me/calendars")
+      .api(apiPath)
       .select("id,name,color,isDefaultCalendar,canEdit,owner")
       .get();
 
     return response.value || [];
   } catch (error) {
-    logger.error("Error fetching Microsoft calendars", { error });
+    logger.error("Error fetching Microsoft calendars", { error, mailboxAddress });
     throw new SafeError("Failed to fetch calendars");
   }
 }

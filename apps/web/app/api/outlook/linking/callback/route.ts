@@ -117,6 +117,36 @@ export const GET = withError("outlook/linking/callback", async (request) => {
 
     const profile = await profileResponse.json();
     const microsoftUserId = profile.id;
+    
+    // For shared mailboxes, fetch the shared mailbox's profile to get correct display name
+    let sharedMailboxProfile: { displayName?: string } | null = null;
+    if (sharedMailboxAddress) {
+      try {
+        const sharedProfileResponse = await fetch(
+          `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sharedMailboxAddress)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${tokens.access_token}`,
+            },
+          },
+        );
+        if (sharedProfileResponse.ok) {
+          sharedMailboxProfile = await sharedProfileResponse.json();
+          logger.info("Fetched shared mailbox profile", {
+            sharedMailboxAddress,
+            displayName: sharedMailboxProfile?.displayName,
+          });
+        } else {
+          logger.warn("Failed to fetch shared mailbox profile, using fallback", {
+            sharedMailboxAddress,
+            status: sharedProfileResponse.status,
+          });
+        }
+      } catch (error) {
+        logger.warn("Error fetching shared mailbox profile", { error, sharedMailboxAddress });
+      }
+    }
+    
     const providerEmail = sharedMailboxAddress || profile.mail || profile.userPrincipalName;
     
     // For shared mailboxes, we combine the primary user ID with the target mailbox email
@@ -215,7 +245,7 @@ export const GET = withError("outlook/linking/callback", async (request) => {
               create: {
                 email: providerEmail,
                 userId: targetUserId,
-                name:
+                name: sharedMailboxProfile?.displayName ||
                   profile.displayName ||
                   profile.givenName ||
                   profile.surname ||

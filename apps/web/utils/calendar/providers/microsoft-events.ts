@@ -11,6 +11,7 @@ export interface MicrosoftCalendarConnectionParams {
   refreshToken: string | null;
   expiresAt: number | null;
   emailAccountId: string;
+  mailboxAddress?: string; // For shared mailboxes
 }
 
 type MicrosoftEvent = {
@@ -47,6 +48,13 @@ export class MicrosoftCalendarEventProvider implements CalendarEventProvider {
     });
   }
 
+  private getCalendarApiPath(): string {
+    const mailboxAddress = this.connection.mailboxAddress;
+    return mailboxAddress && mailboxAddress !== "me"
+      ? `/users/${encodeURIComponent(mailboxAddress)}/calendar`
+      : "/me/calendar";
+  }
+
   async fetchEventsWithAttendee({
     attendeeEmail,
     timeMin,
@@ -62,7 +70,7 @@ export class MicrosoftCalendarEventProvider implements CalendarEventProvider {
 
     // Use calendarView endpoint which correctly returns events overlapping the time range
     const response = await client
-      .api("/me/calendar/calendarView")
+      .api(`${this.getCalendarApiPath()}/calendarView`)
       .query({
         startDateTime: timeMin.toISOString(),
         endDateTime: timeMax.toISOString(),
@@ -103,7 +111,7 @@ export class MicrosoftCalendarEventProvider implements CalendarEventProvider {
 
     // Use calendarView endpoint which correctly returns events overlapping the time range
     const response = await client
-      .api("/me/calendar/calendarView")
+      .api(`${this.getCalendarApiPath()}/calendarView`)
       .query({
         startDateTime: timeMin.toISOString(),
         endDateTime: effectiveTimeMax.toISOString(),
