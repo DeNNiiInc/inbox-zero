@@ -97,8 +97,11 @@ export async function handleCalendarCallback(
     );
 
     // Step 5: Exchange code for tokens and get email
-    const { accessToken, refreshToken, expiresAt, email } =
+    const { accessToken, refreshToken, expiresAt, email: authEmail } =
       await provider.exchangeCodeForTokens(code);
+
+    // For shared mailboxes, use the mailboxAddress as the connection email
+    const email = mailboxAddress || authEmail;
 
     // Step 6: Check if connection already exists
     const existingConnection = await checkExistingConnection(
