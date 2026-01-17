@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import useSWR from "swr";
+import { EMAIL_ACCOUNT_HEADER } from "@/utils/config";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -40,7 +41,10 @@ export function BulkProcessControl({ emailAccountId }: BulkProcessControlProps) 
     try {
       const res = await fetch(`/api/user/bulk-process/start`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          [EMAIL_ACCOUNT_HEADER]: emailAccountId
+        },
         body: JSON.stringify({ 
           maxEmails: selectedCount,
           skipArchive
@@ -67,7 +71,10 @@ export function BulkProcessControl({ emailAccountId }: BulkProcessControlProps) 
     try {
       const res = await fetch(`/api/user/bulk-process/status`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          [EMAIL_ACCOUNT_HEADER]: emailAccountId
+        },
         body: JSON.stringify({ action: "pause", jobId: job.id }),
       });
       if (!res.ok) throw new Error("Failed to pause");
@@ -86,7 +93,10 @@ export function BulkProcessControl({ emailAccountId }: BulkProcessControlProps) 
     try {
       const res = await fetch(`/api/user/bulk-process/resume`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          [EMAIL_ACCOUNT_HEADER]: emailAccountId
+        },
         body: JSON.stringify({ jobId: job.id }),
       });
       if (!res.ok) throw new Error("Failed to resume");
@@ -105,7 +115,10 @@ export function BulkProcessControl({ emailAccountId }: BulkProcessControlProps) 
     try {
       const res = await fetch(`/api/user/bulk-process/stop`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          [EMAIL_ACCOUNT_HEADER]: emailAccountId
+        },
         body: JSON.stringify({ jobId: job.id }),
       });
       if (!res.ok) throw new Error("Failed to stop");
