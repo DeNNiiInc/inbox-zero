@@ -1,35 +1,30 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { withEmailAccount } from "@/utils/auth/middleware";
+import { withEmailAccount } from "@/utils/middleware";
 import { startBulkProcessing } from "@/utils/bulk/bulk-processing";
 
 const startSchema = z.object({
-  maxEmails: z.enum(["5000", "10000", "all"]).optional(),
+  maxEmails: z.union([z.literal("all"), z.string().regex(/^\d+$/), z.number()]),
   skipArchive: z.boolean().optional(),
 });
 
-export const POST = withEmailAccount(async (request) => {
-  const { emailAccountId } = request.auth;
-  const json = await request.json();
-  const body = startSchema.parse(json);
+export const POST = withEmailAccount("bulk-process/start", async (request) => {
+  const body = await request.json();
+  const validation = startSchema.safeParse(body);
 
-  let maxEmails: number | undefined;
-  if (body.maxEmails === "5000") maxEmails = 5000;
-  if (body.maxEmails === "10000") maxEmails = 10000;
-  // "all" leaves maxEmails as undefined
-
-  try {
-    const job = await startBulkProcessing({
-      emailAccountId,
-      maxEmails,
-      skipArchive: body.skipArchive,
-    });
-
-    return NextResponse.json(job);
-  } catch (error: any) {
-    return NextResponse.json(
-      { error: error.message },
-      { status: 400 }
-    );
+  if (!validation.success) {
+    return NextResponse.json({ error: "Invalid input" }, { status: 400 });
   }
+
+  const { maxEmails, skipArchive } = validation.data;
+
+  const limit = maxEmails === "all" ? undefined : (typeof maxEmails === 'string' ? parseInt(maxEmails) : maxEmails);
+  
+  const jobId = await startBulkProcessing({
+    emailAccountId: request.auth.emailAccountId,
+    maxEmails: limit,
+    skipArchive: skipArchive
+  });
+
+  return NextResponse.json({ jobId });
 });

@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { PlayIcon, PauseIcon, StopIcon, UpdateIcon } from "@radix-ui/react-icons";
+import { PlayIcon, PauseIcon, SquareIcon, Loader2Icon } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
@@ -211,11 +211,11 @@ export function BulkProcessControl({ emailAccountId }: BulkProcessControlProps) 
                    onClick={handleStop}
                    disabled={isLoadingAction}
                  >
-                   <StopIcon className="mr-2 h-4 w-4" /> Stop Job
+                   <SquareIcon className="mr-2 h-4 w-4" /> Stop Job
                  </Button>
                  {isProcessing && (
                    <div className="flex items-center text-xs text-muted-foreground animate-pulse">
-                     <UpdateIcon className="mr-1 h-3 w-3 animate-spin" /> Processing in background...
+                     <Loader2Icon className="mr-1 h-3 w-3 animate-spin" /> Processing in background...
                    </div>
                  )}
               </CardFooter>
