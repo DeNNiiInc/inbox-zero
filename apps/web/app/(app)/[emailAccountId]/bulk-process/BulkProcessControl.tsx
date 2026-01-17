@@ -8,7 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { PlayIcon, PauseIcon, SquareIcon, Loader2Icon } from "lucide-react";
+import { PlayIcon, PauseIcon, SquareIcon, Loader2Icon, AlertCircle, CheckCircle } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
@@ -148,6 +149,18 @@ export function BulkProcessControl({ emailAccountId }: BulkProcessControlProps) 
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {job && (job.status === "COMPLETED" || job.status === "FAILED") && (
+            <Alert variant={job.status === "FAILED" ? "destructive" : "default"} className="mb-6">
+              {job.status === "FAILED" ? <AlertCircle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
+              <AlertTitle>Job {job.status === "FAILED" ? "Failed" : "Completed"}</AlertTitle>
+              <AlertDescription>
+                Finished at {new Date(job.completedAt || job.updatedAt || new Date()).toLocaleString()}.
+                <br />
+                Processed {job.processedCount} emails with {job.errorCount} errors.
+              </AlertDescription>
+            </Alert>
+          )}
+
           {(!job || job.status === "COMPLETED" || job.status === "FAILED") && (
             <div className="space-y-4">
               <div className="grid gap-2">
