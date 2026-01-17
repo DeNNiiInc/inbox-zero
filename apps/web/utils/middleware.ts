@@ -221,7 +221,7 @@ async function emailAccountMiddleware(
 
   if (!emailAccountId) {
     return NextResponse.json(
-      { error: "Email account ID is required", isKnownError: true },
+      { error: "Email account ID is required (Header missing)", isKnownError: true },
       { status: 403 },
     );
   }
@@ -242,7 +242,7 @@ async function emailAccountMiddleware(
       emailAccountLogger.error("Org admin access denied");
       return NextResponse.json(
         { 
-          error: "Insufficient permissions", 
+          error: `Insufficient permissions. User: ${userId}, Account: ${emailAccountId}`, 
           isKnownError: true,
           debug: { userId, emailAccountId }
         },
@@ -273,7 +273,7 @@ async function emailAccountMiddleware(
   if (!email) {
     emailAccountLogger.error("Invalid email account ID");
     return NextResponse.json(
-      { error: "Invalid account ID", isKnownError: true },
+      { error: `Invalid account ID: ${emailAccountId} for User: ${userId}`, isKnownError: true },
       { status: 403 },
     );
   }
