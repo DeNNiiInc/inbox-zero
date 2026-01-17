@@ -235,7 +235,7 @@ async function handler(request: Request) {
       // Queue next batch
       await bulkPublishToQstash({
         items: [{
-          content: { jobId },
+          body: { jobId },
           url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/user/bulk-process/worker`,
         }],
       });
