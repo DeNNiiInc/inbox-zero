@@ -24,7 +24,7 @@ export const POST = withEmailAccount("bulk-process/status/action", async (reques
   const { action, jobId } = validation.data;
   
   if (action === "pause") {
-      await pauseBulkProcessing(jobId, request.auth.emailAccountId);
+      await pauseBulkProcessing(request.auth.emailAccountId, jobId);
   }
 
   return NextResponse.json({ success: true });
