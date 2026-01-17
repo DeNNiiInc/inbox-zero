@@ -230,7 +230,7 @@ export class OutlookProvider implements EmailProvider {
     const response: { value: Message[] } = await withOutlookRetry(
       () =>
         this.client
-          .api("/mailFolders('sentitems')/messages")
+          .api("/mailFolders/sentitems/messages")
           .select(MESSAGE_SELECT_FIELDS)
           .top(maxResults)
           .orderby("sentDateTime desc")
@@ -278,8 +278,7 @@ export class OutlookProvider implements EmailProvider {
     }
 
     let request = this.client
-      .getClient()
-      .api("/mailFolders('sentitems')/messages")
+      .api("/mailFolders/sentitems/messages")
       .select("id,conversationId")
       .top(maxResults)
       .orderby("sentDateTime desc");
@@ -336,7 +335,7 @@ export class OutlookProvider implements EmailProvider {
 
     // Get messages from Microsoft Graph API (well-known Sent Items folder)
     let request = this.client
-      .api("/mailFolders('sentitems')/messages")
+      .api("/mailFolders/sentitems/messages")
       .select(MESSAGE_SELECT_FIELDS)
       .top(maxResults)
       .orderby("sentDateTime desc");
@@ -446,7 +445,6 @@ export class OutlookProvider implements EmailProvider {
     const message = await withOutlookRetry(
       () =>
         this.client
-          .getClient()
           .api(`/messages/${messageId}`)
           .select("categories")
           .get(),
@@ -1220,7 +1218,7 @@ export class OutlookProvider implements EmailProvider {
 
       // Route to appropriate endpoint based on type
       if (type === "sent") {
-        endpoint = "/mailFolders('sentitems')/messages";
+        endpoint = "/mailFolders/sentitems/messages";
       } else if (type === "all") {
         // For "all" type, use default messages endpoint with folder filter
         filters.push(
