@@ -3,7 +3,9 @@
 import { useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
+import useSWR from "swr";
 import { getEmailTerminology } from "@/utils/terminology";
+import { cn } from "@/utils";
 import {
   AlertCircleIcon,
   ArchiveIcon,
@@ -30,6 +32,7 @@ import {
   TagIcon,
   Users2Icon,
   ZapIcon,
+  WorkflowIcon,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { useComposeModal } from "@/providers/ComposeModalProvider";
@@ -88,12 +91,25 @@ export const useNavigation = () => {
   const { emailAccountId, emailAccount, provider } = useAccount();
   const currentEmailAccountId = emailAccount?.id || emailAccountId;
 
+  const { data: jobStatus } = useSWR(
+    currentEmailAccountId ? `/api/user/bulk-process/status` : null,
+    { refreshInterval: 5000 }
+  );
+  const isProcessing = jobStatus?.job?.status === "PROCESSING" || jobStatus?.job?.status === "PENDING";
+
   const navItems: NavItem[] = useMemo(
     () => [
       {
         name: "Assistant",
         href: prefixPath(currentEmailAccountId, "/automation"),
         icon: SparklesIcon,
+      },
+      {
+        name: "Bulk Automation",
+        href: prefixPath(currentEmailAccountId, "/bulk-process"),
+        icon: () => (
+          <WorkflowIcon className={cn("size-4", isProcessing && "animate-spin")} />
+        ),
       },
       {
         name: "Bulk Unsubscribe",
