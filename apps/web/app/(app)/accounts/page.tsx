@@ -327,6 +327,7 @@ function AccountOptionsDropdown({
           <div className="py-4">
             <Input
               type="email"
+              name="sharedMailboxEmail"
               placeholder="shared-mailbox@company.com"
               registerProps={{
                 value: sharedMailboxEmail,
