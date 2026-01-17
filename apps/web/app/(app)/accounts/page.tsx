@@ -78,6 +78,9 @@ function AccountItem({
     email: string;
     image: string | null;
     isPrimary: boolean;
+    account: {
+      provider: string;
+    };
   };
   allAccounts: Array<{
     id: string;
@@ -85,6 +88,9 @@ function AccountItem({
     email: string;
     image: string | null;
     isPrimary: boolean;
+    account: {
+      provider: string;
+    };
   }>;
   onAccountDeleted: () => void;
 }) {
@@ -112,6 +118,9 @@ function AccountHeader({
     email: string;
     image: string | null;
     isPrimary: boolean;
+    account: {
+      provider: string;
+    };
   };
   allAccounts: Array<{
     id: string;
@@ -119,6 +128,9 @@ function AccountHeader({
     email: string;
     image: string | null;
     isPrimary: boolean;
+    account: {
+      provider: string;
+    };
   }>;
   onAccountDeleted: () => void;
 }) {
@@ -173,6 +185,9 @@ function AccountOptionsDropdown({
     email: string;
     image: string | null;
     isPrimary: boolean;
+    account: {
+      provider: string;
+    };
   }>;
   onAccountDeleted: () => void;
 }) {
