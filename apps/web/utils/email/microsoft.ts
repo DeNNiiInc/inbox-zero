@@ -249,7 +249,7 @@ export class OutlookProvider implements EmailProvider {
     const response: { value: Message[] } = await withOutlookRetry(
       () =>
         this.client
-          .api("/mailFolders('inbox')/messages")
+          .api("/mailFolders/inbox/messages")
           .select(MESSAGE_SELECT_FIELDS)
           .top(maxResults)
           .orderby("receivedDateTime desc")
