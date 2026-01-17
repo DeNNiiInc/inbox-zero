@@ -146,6 +146,21 @@ if [ ! -z "$OLLAMA_API_KEY" ]; then
     sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "cd $PROJECT_PATH/apps/web && touch .env && sed -i '/OLLAMA_BASE_URL/d' .env && sed -i '/OLLAMA_API_KEY/d' .env && sed -i '/OLLAMA_MODEL/d' .env && echo 'OLLAMA_BASE_URL=\"$OLLAMA_BASE_URL\"' >> .env && echo 'OLLAMA_API_KEY=\"$OLLAMA_API_KEY\"' >> .env && echo 'OLLAMA_MODEL=\"$OLLAMA_MODEL\"' >> .env"
 fi
 
+# Microsoft OAuth
+MICROSOFT_CLIENT_ID=$(php -r "include '$SECRETS_FILE'; echo \$secrets['microsoft_client_id'] ?? '';")
+MICROSOFT_CLIENT_SECRET=$(php -r "include '$SECRETS_FILE'; echo \$secrets['microsoft_client_secret'] ?? '';")
+MICROSOFT_TENANT_ID=$(php -r "include '$SECRETS_FILE'; echo \$secrets['microsoft_tenant_id'] ?? 'common';")
+MICROSOFT_WEBHOOK_CLIENT_STATE=$(php -r "include '$SECRETS_FILE'; echo \$secrets['microsoft_webhook_client_state'] ?? '';")
+
+# Google OAuth
+GOOGLE_CLIENT_ID=$(php -r "include '$SECRETS_FILE'; echo \$secrets['google_client_id'] ?? '';")
+GOOGLE_CLIENT_SECRET=$(php -r "include '$SECRETS_FILE'; echo \$secrets['google_client_secret'] ?? '';")
+
+# Security Keys
+AUTH_SECRET=$(php -r "include '$SECRETS_FILE'; echo \$secrets['auth_secret'] ?? \$secrets['nextauth_secret'] ?? '';")
+EMAIL_ENCRYPT_SECRET=$(php -r "include '$SECRETS_FILE'; echo \$secrets['email_encrypt_secret'] ?? '';")
+EMAIL_ENCRYPT_SALT=$(php -r "include '$SECRETS_FILE'; echo \$secrets['email_encrypt_salt'] ?? '';")
+
 echo "[Step 3c/4] Injecting Main LLM Defaults & Keys..."
 sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "cd $PROJECT_PATH/apps/web && touch .env \
 && sed -i '/DEFAULT_LLM_PROVIDER/d' .env && echo 'DEFAULT_LLM_PROVIDER=\"$DEFAULT_LLM_PROVIDER\"' >> .env \
@@ -156,7 +171,16 @@ sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "cd $PROJEC
 && sed -i '/ECONOMY_LLM_MODEL/d' .env && echo 'ECONOMY_LLM_MODEL=\"$ECONOMY_LLM_MODEL\"' >> .env \
 && sed -i '/OPENAI_API_KEY/d' .env && echo 'OPENAI_API_KEY=\"$OPENAI_API_KEY\"' >> .env \
 && sed -i '/ANTHROPIC_API_KEY/d' .env && echo 'ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"' >> .env \
-&& sed -i '/OPENROUTER_API_KEY/d' .env && echo 'OPENROUTER_API_KEY=\"$OPENROUTER_API_KEY\"' >> .env"
+&& sed -i '/OPENROUTER_API_KEY/d' .env && echo 'OPENROUTER_API_KEY=\"$OPENROUTER_API_KEY\"' >> .env \
+&& sed -i '/MICROSOFT_CLIENT_ID/d' .env && echo 'MICROSOFT_CLIENT_ID=\"$MICROSOFT_CLIENT_ID\"' >> .env \
+&& sed -i '/MICROSOFT_CLIENT_SECRET/d' .env && echo 'MICROSOFT_CLIENT_SECRET=\"$MICROSOFT_CLIENT_SECRET\"' >> .env \
+&& sed -i '/MICROSOFT_TENANT_ID/d' .env && echo 'MICROSOFT_TENANT_ID=\"$MICROSOFT_TENANT_ID\"' >> .env \
+&& sed -i '/MICROSOFT_WEBHOOK_CLIENT_STATE/d' .env && echo 'MICROSOFT_WEBHOOK_CLIENT_STATE=\"$MICROSOFT_WEBHOOK_CLIENT_STATE\"' >> .env \
+&& sed -i '/GOOGLE_CLIENT_ID/d' .env && echo 'GOOGLE_CLIENT_ID=\"$GOOGLE_CLIENT_ID\"' >> .env \
+&& sed -i '/GOOGLE_CLIENT_SECRET/d' .env && echo 'GOOGLE_CLIENT_SECRET=\"$GOOGLE_CLIENT_SECRET\"' >> .env \
+&& sed -i '/AUTH_SECRET/d' .env && echo 'AUTH_SECRET=\"$AUTH_SECRET\"' >> .env \
+&& sed -i '/EMAIL_ENCRYPT_SECRET/d' .env && echo 'EMAIL_ENCRYPT_SECRET=\"$EMAIL_ENCRYPT_SECRET\"' >> .env \
+&& sed -i '/EMAIL_ENCRYPT_SALT/d' .env && echo 'EMAIL_ENCRYPT_SALT=\"$EMAIL_ENCRYPT_SALT\"' >> .env"
 
 sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "bash /root/deploy_build.sh"
 if [ $? -ne 0 ]; then
