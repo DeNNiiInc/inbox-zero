@@ -17,7 +17,7 @@ export const POST = withEmailAccount("bulk-process/resume", async (request) => {
 
   const { jobId } = validation.data;
   
-  await resumeBulkProcessing(jobId, request.auth.emailAccountId);
+  await resumeBulkProcessing(request.auth.emailAccountId, jobId);
 
   return NextResponse.json({ success: true });
 }, { allowOrgAdmins: true });
