@@ -23,6 +23,7 @@ cp /tmp/.env.backup apps/web/.env 2>/dev/null || true
 
 # Run database migrations
 echo "Running database migrations..."
+cd apps/web
 npx prisma db push --accept-data-loss
 
 # Start the application using pnpm start
