@@ -1,5 +1,6 @@
 import prisma from "@/utils/prisma";
-import type { BulkProcessingJob, BulkProcessingStatus } from "@/generated/prisma";
+import type { BulkProcessingJob } from "@/generated/prisma/client";
+import type { BulkProcessingStatus } from "@/generated/prisma/enums";
 import { bulkPublishToQstash } from "@/utils/upstash";
 
 export interface StartBulkProcessParams {
