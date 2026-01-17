@@ -1,8 +1,21 @@
 # Inbox Zero Self-Hosting Deployment Guide
 
-**Last Updated:** 2026-01-08  
+**Last Updated:** 2026-01-17  
 **Target Environment:** Ubuntu 22.04+ (Non-Docker)  
 **Tested Server:** 172.16.69.227
+
+---
+
+## Quick Start (Existing Server)
+
+If you already have the server set up and just need to redeploy:
+
+```bash
+# From your local machine (macOS/WSL)
+bash redeploy_ai_agent.sh
+```
+
+This script reads `secrets.php`, builds locally, uploads, and deploys automatically.
 
 ---
 
@@ -15,8 +28,12 @@
 5. [Environment Configuration](#5-environment-configuration)
 6. [Cloudflare Tunnel Setup](#6-cloudflare-tunnel-setup)
 7. [Starting the Application](#7-starting-the-application)
-8. [Troubleshooting](#8-troubleshooting)
-9. [Maintenance Commands](#9-maintenance-commands)
+8. [Google OAuth Setup](#8-google-oauth-setup)
+9. [Cron Job Setup](#9-cron-job-setup)
+10. [Troubleshooting](#10-troubleshooting)
+10A. [Microsoft Azure AD Setup](#10a-microsoft-azure-ad-setup)
+11. [Maintenance Commands](#11-maintenance-commands)
+12. [Fresh Server Deployment Checklist](#12-fresh-server-deployment-checklist)
 
 ---
 
@@ -540,6 +557,82 @@ tail -f /var/log/inbox-zero.log | grep -i "api key"
 
 Ensure `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are set in `.env`.
 
+---
+
+## 10A. Microsoft Azure AD Setup
+
+> [!IMPORTANT]
+> This section is **required** for Microsoft 365/Outlook support.
+
+### 10A.1 Create App Registration
+
+1. Go to [Azure Portal](https://portal.azure.com/) → **Azure Active Directory** → **App Registrations**
+2. Click **+ New registration**
+3. Configure:
+   - **Name**: `Inbox Zero`
+   - **Supported account types**: Select **Accounts in any organizational directory (Multitenant)** for multi-tenant support
+   - **Redirect URI**: Leave blank for now (we'll add these later)
+4. Click **Register**
+5. Copy the **Application (client) ID** → `MICROSOFT_CLIENT_ID`
+
+### 10A.2 Create Client Secret
+
+1. In your app registration, go to **Certificates & secrets**
+2. Click **+ New client secret**
+3. Set expiration (recommended: 24 months)
+4. Copy the **Value** immediately → `MICROSOFT_CLIENT_SECRET`
+
+### 10A.3 Configure Redirect URIs
+
+Go to **Authentication** → **Add a platform** → **Web**:
+
+Add these redirect URIs (replace `your-domain.com`):
+```
+https://your-domain.com/api/auth/callback/microsoft
+https://your-domain.com/api/outlook/linking/callback
+https://your-domain.com/api/outlook/calendar/callback
+```
+
+### 10A.4 Configure API Permissions
+
+> [!CAUTION]
+> The `User.ReadBasic.All` permission requires **Admin Consent** and is essential for shared mailbox display names.
+
+Go to **API Permissions** → **+ Add a permission** → **Microsoft Graph** → **Delegated permissions**:
+
+| Permission | Purpose |
+|------------|---------|
+| `openid` | OpenID Connect authentication |
+| `profile` | Basic user profile |
+| `email` | User email address |
+| `User.Read` | Read signed-in user profile |
+| `User.ReadBasic.All` | **Read shared mailbox display names** (requires admin consent) |
+| `offline_access` | Refresh tokens for persistent access |
+| `Mail.ReadWrite` | Read/write emails |
+| `Mail.ReadWrite.Shared` | **Access shared mailboxes** |
+| `Mail.Send` | Send emails (if enabled) |
+| `Mail.Send.Shared` | **Send from shared mailboxes** (if enabled) |
+| `Calendars.Read` | Read calendars |
+| `Calendars.ReadWrite` | Read/write calendars |
+| `Calendars.Read.Shared` | **Read shared mailbox calendars** |
+
+After adding permissions, click **Grant admin consent for [Your Organization]**.
+
+### 10A.5 Shared Mailbox Support
+
+For the shared mailbox feature to work correctly:
+
+1. **User.ReadBasic.All** - Required to fetch the shared mailbox's display name from the directory
+2. **Mail.ReadWrite.Shared** - Required to access the shared mailbox's emails
+3. **Calendars.Read.Shared** - Required to access the shared mailbox's calendar
+
+The application uses these endpoints for shared mailboxes:
+- Profile: `GET /users/{sharedMailboxEmail}` (requires `User.ReadBasic.All`)
+- Calendars: `GET /users/{sharedMailboxEmail}/calendars` (requires `Calendars.Read.Shared`)
+- Email: `GET /users/{sharedMailboxEmail}/messages` (requires `Mail.ReadWrite.Shared`)
+
+---
+
 ### Google "Access blocked: App has not completed verification"
 
 ```
@@ -611,3 +704,171 @@ pgrep -f "next-server" && echo "Running" || echo "Stopped"
 | `/root/restart_app.sh` | Application restart script (on server) |
 | `/var/log/inbox-zero.log` | Application logs (on server) |
 | `.agent/workflows/deploy-inbox-zero.md` | AI agent deployment workflow |
+
+---
+
+## 12. Fresh Server Deployment Checklist
+
+Use this checklist when deploying to a **brand new server**.
+
+### Pre-Deployment (Local Machine)
+
+- [ ] **Copy `secrets.sample.php` to `secrets.php`**
+  ```bash
+  cp secrets.sample.php secrets.php
+  ```
+- [ ] **Fill in all credentials in `secrets.php`**:
+  - SSH credentials (`ssh_host`, `ssh_username`, `ssh_password`)
+  - Database credentials (`db_user`, `db_password`)
+  - AI API keys (`openai_api_key`, `anthropic_api_key`)
+  - Microsoft OAuth (`microsoft_client_id`, `microsoft_client_secret`, `microsoft_tenant_id`)
+  - Google OAuth (if using Gmail)
+  - Security keys (generate with `openssl rand -hex 32`)
+  - Upstash/QStash credentials
+  - Project URL (`project_url`)
+
+### Server Setup
+
+1. **Install system dependencies**:
+   ```bash
+   apt update && apt upgrade -y
+   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+   apt install -y nodejs postgresql postgresql-contrib git openssl
+   npm install -g pnpm
+   ```
+
+2. **Setup PostgreSQL**:
+   ```bash
+   sudo -u postgres psql <<EOF
+   CREATE USER postgres WITH PASSWORD 'YOUR_DB_PASSWORD';
+   CREATE DATABASE inboxzero OWNER postgres;
+   GRANT ALL PRIVILEGES ON DATABASE inboxzero TO postgres;
+   EOF
+   ```
+
+3. **Clone repository**:
+   ```bash
+   mkdir -p /var/www
+   cd /var/www
+   git clone https://github.com/DeNNiiInc/inbox-zero.git
+   cd inbox-zero
+   ```
+
+4. **Install Cloudflare Tunnel**:
+   ```bash
+   curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
+   chmod +x /usr/local/bin/cloudflared
+   cloudflared service install YOUR_TUNNEL_TOKEN
+   systemctl enable cloudflared
+   systemctl start cloudflared
+   ```
+
+### OAuth Provider Setup
+
+5. **Microsoft Azure AD** (for Outlook/M365):
+   - Create App Registration in Azure Portal
+   - Add redirect URIs (see [Section 10A](#10a-microsoft-azure-ad-setup))
+   - Add API permissions including `User.ReadBasic.All`, `Mail.ReadWrite.Shared`
+   - Grant admin consent
+   - Copy Client ID and Secret to `secrets.php`
+
+6. **Google OAuth** (for Gmail - optional):
+   - Create OAuth Client in Google Cloud Console
+   - Add redirect URIs (see [Section 8](#8-google-oauth-setup))
+   - Enable Gmail, Calendar, and People APIs
+   - Configure Pub/Sub for real-time notifications
+   - Copy Client ID and Secret to `secrets.php`
+
+### Deployment
+
+7. **Run automated deployment from local machine**:
+   ```bash
+   bash redeploy_ai_agent.sh
+   ```
+
+   This will:
+   - Build the application locally
+   - Upload the artifact to the server
+   - Extract and configure the application
+   - Run database migrations
+   - Start the application
+
+### Post-Deployment
+
+8. **Setup cron jobs for email watch renewal**:
+   ```bash
+   bash setup_cron_jobs.sh
+   ```
+
+9. **Verify deployment**:
+   ```bash
+   # Check application is running
+   ssh root@YOUR_SERVER 'pgrep -f next-server && echo "Running" || echo "Stopped"'
+   
+   # Check logs
+   ssh root@YOUR_SERVER 'tail -50 /var/log/inbox-zero.log'
+   
+   # Test URL
+   curl -I https://your-domain.com
+   ```
+
+10. **Test OAuth flows**:
+    - Navigate to the application URL
+    - Test Microsoft login
+    - Test linking a shared mailbox
+    - Test calendar connection
+
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| "Mailbox is inactive" error | Set `MICROSOFT_TENANT_ID=common` |
+| Shared mailbox shows wrong name | Grant `User.ReadBasic.All` permission in Azure |
+| Calendar connects to wrong account | Ensure `mailboxAddress` is passed in OAuth state |
+| Real-time notifications not working | Verify cron job is running with `cat /etc/cron.d/inbox-zero` |
+
+---
+
+## Appendix: Deployment Script Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    LOCAL MACHINE (macOS/WSL)                         │
+│                                                                      │
+│  secrets.php ─────────┐                                              │
+│                       v                                              │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │             redeploy_ai_agent.sh                             │    │
+│  │                                                              │    │
+│  │  1. Parse credentials from secrets.php                       │    │
+│  │  2. Run local_build_fast.sh                                  │    │
+│  │     └── copies to native FS, runs pnpm build                 │    │
+│  │     └── creates deployment.tar.gz                            │    │
+│  │  3. Upload deployment.tar.gz to server                       │    │
+│  │  4. Upload deploy_build.sh to server                         │    │
+│  │  5. Inject environment variables                             │    │
+│  │  6. Execute deploy_build.sh remotely                         │    │
+│  │  7. Verify deployment                                        │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    v
+┌─────────────────────────────────────────────────────────────────────┐
+│                    REMOTE SERVER                                     │
+│                                                                      │
+│  /var/www/inbox-zero/deployment.tar.gz                               │
+│                       │                                              │
+│                       v                                              │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │             /root/deploy_build.sh                            │    │
+│  │                                                              │    │
+│  │  1. Stop running next-server process                         │    │
+│  │  2. Backup .env file                                         │    │
+│  │  3. Extract deployment.tar.gz to apps/web/                   │    │
+│  │  4. Restore .env file                                        │    │
+│  │  5. Run prisma db push                                       │    │
+│  │  6. Start application with pnpm start                        │    │
+│  │  7. Application runs and logs to /var/log/inbox-zero.log     │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────┘
+```
