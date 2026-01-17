@@ -1,24 +1,23 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { withEmailAccount } from "@/utils/auth/middleware";
+import { withEmailAccount } from "@/utils/middleware";
 import { stopBulkProcessing } from "@/utils/bulk/bulk-processing";
 
 const stopSchema = z.object({
   jobId: z.string(),
 });
 
-export const POST = withEmailAccount(async (request) => {
-  const { emailAccountId } = request.auth;
-  const json = await request.json();
-  const body = stopSchema.parse(json);
+export const POST = withEmailAccount("bulk-process/stop", async (request) => {
+  const body = await request.json();
+  const validation = stopSchema.safeParse(body);
 
-  try {
-    const job = await stopBulkProcessing(emailAccountId, body.jobId);
-    return NextResponse.json(job);
-  } catch (error: any) {
-    return NextResponse.json(
-      { error: error.message },
-      { status: 400 }
-    );
+  if (!validation.success) {
+    return NextResponse.json({ error: "Invalid input" }, { status: 400 });
   }
+
+  const { jobId } = validation.data;
+  
+  await stopBulkProcessing(jobId, request.auth.emailAccountId);
+
+  return NextResponse.json({ success: true });
 });

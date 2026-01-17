@@ -1,41 +1,31 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { withEmailAccount } from "@/utils/auth/middleware";
-import { 
-  getBulkProcessingStatus, 
-  pauseBulkProcessing 
-} from "@/utils/bulk/bulk-processing";
+import { withEmailAccount } from "@/utils/middleware";
+import { getBulkProcessingStatus, pauseBulkProcessing } from "@/utils/bulk/bulk-processing";
 
-const actionSchema = z.object({
-  action: z.enum(["pause"]).optional(),
-  jobId: z.string().optional(),
-});
-
-export const GET = withEmailAccount(async (request) => {
-  const { emailAccountId } = request.auth;
-  const status = await getBulkProcessingStatus(emailAccountId);
+export const GET = withEmailAccount("bulk-process/status", async (request) => {
+  const status = await getBulkProcessingStatus(request.auth.emailAccountId);
   return NextResponse.json({ job: status });
 });
 
-export const POST = withEmailAccount(async (request) => {
-  const { emailAccountId } = request.auth;
-  const json = await request.json();
-  const body = actionSchema.parse(json);
+const actionSchema = z.object({
+  action: z.literal("pause"),
+  jobId: z.string(),
+});
 
-  if (body.action === "pause" && body.jobId) {
-    try {
-      const job = await pauseBulkProcessing(emailAccountId, body.jobId);
-      return NextResponse.json(job);
-    } catch (error: any) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: 400 }
-      );
-    }
+export const POST = withEmailAccount("bulk-process/status/action", async (request) => {
+  const body = await request.json();
+  const validation = actionSchema.safeParse(body);
+
+  if (!validation.success) {
+    return NextResponse.json({ error: "Invalid input" }, { status: 400 });
   }
 
-  return NextResponse.json(
-    { error: "Invalid action" },
-    { status: 400 }
-  );
+  const { action, jobId } = validation.data;
+  
+  if (action === "pause") {
+      await pauseBulkProcessing(jobId, request.auth.emailAccountId);
+  }
+
+  return NextResponse.json({ success: true });
 });
