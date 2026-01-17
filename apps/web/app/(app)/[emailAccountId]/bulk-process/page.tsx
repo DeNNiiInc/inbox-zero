@@ -4,11 +4,10 @@ export const metadata = {
   title: "Bulk Processing | Inbox Zero",
 };
 
-export default function BulkProcessPage({
-  params: { emailAccountId },
-}: {
-  params: { emailAccountId: string };
+export default async function BulkProcessPage(props: {
+  params: Promise<{ emailAccountId: string }>;
 }) {
+  const { emailAccountId } = await props.params;
   return (
     <div className="container py-8 max-w-4xl">
       <div className="mb-8">
