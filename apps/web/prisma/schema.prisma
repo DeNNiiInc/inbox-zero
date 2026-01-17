@@ -1353,6 +1353,7 @@ model BulkProcessingJob {
   totalEmails    Int // Target number of emails to process
   processedCount Int                  @default(0)
   errorCount     Int                  @default(0)
+  lastError      String?
 
   startedAt       DateTime?
   completedAt     DateTime?

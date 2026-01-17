@@ -208,7 +208,10 @@ async function handler(request: Request) {
         // Update error count
         await prisma.bulkProcessingJob.update({
              where: { id: jobId },
-             data: { errorCount: { increment: 1 } }
+             data: { 
+               errorCount: { increment: 1 },
+               lastError: error instanceof Error ? error.message : String(error)
+             }
         });
       }
     }
