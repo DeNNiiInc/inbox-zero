@@ -210,7 +210,11 @@ async function handler(request: Request) {
              where: { id: jobId },
              data: { 
                errorCount: { increment: 1 },
-               lastError: error instanceof Error ? error.message : String(error)
+               lastError: error instanceof Error 
+                 ? error.message 
+                 : (typeof error === 'object' && error !== null && 'message' in error)
+                   ? String((error as { message: unknown }).message)
+                   : (typeof error === 'object' ? JSON.stringify(error) : String(error))
              }
         });
       }
