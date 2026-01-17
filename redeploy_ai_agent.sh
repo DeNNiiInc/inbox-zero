@@ -160,6 +160,9 @@ GOOGLE_CLIENT_SECRET=$(php -r "include '$SECRETS_FILE'; echo \$secrets['google_c
 AUTH_SECRET=$(php -r "include '$SECRETS_FILE'; echo \$secrets['auth_secret'] ?? \$secrets['nextauth_secret'] ?? '';")
 EMAIL_ENCRYPT_SECRET=$(php -r "include '$SECRETS_FILE'; echo \$secrets['email_encrypt_secret'] ?? '';")
 EMAIL_ENCRYPT_SALT=$(php -r "include '$SECRETS_FILE'; echo \$secrets['email_encrypt_salt'] ?? '';")
+INTERNAL_API_KEY=$(php -r "include '$SECRETS_FILE'; echo \$secrets['internal_api_key'] ?? '';")
+API_KEY_SALT=$(php -r "include '$SECRETS_FILE'; echo \$secrets['api_key_salt'] ?? '';")
+PROJECT_URL=$(php -r "include '$SECRETS_FILE'; echo \$secrets['project_url'] ?? '';")
 
 echo "[Step 3c/4] Injecting Main LLM Defaults & Keys..."
 sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "cd $PROJECT_PATH/apps/web && touch .env \
@@ -180,7 +183,10 @@ sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "cd $PROJEC
 && sed -i '/GOOGLE_CLIENT_SECRET/d' .env && echo 'GOOGLE_CLIENT_SECRET=\"$GOOGLE_CLIENT_SECRET\"' >> .env \
 && sed -i '/AUTH_SECRET/d' .env && echo 'AUTH_SECRET=\"$AUTH_SECRET\"' >> .env \
 && sed -i '/EMAIL_ENCRYPT_SECRET/d' .env && echo 'EMAIL_ENCRYPT_SECRET=\"$EMAIL_ENCRYPT_SECRET\"' >> .env \
-&& sed -i '/EMAIL_ENCRYPT_SALT/d' .env && echo 'EMAIL_ENCRYPT_SALT=\"$EMAIL_ENCRYPT_SALT\"' >> .env"
+&& sed -i '/EMAIL_ENCRYPT_SALT/d' .env && echo 'EMAIL_ENCRYPT_SALT=\"$EMAIL_ENCRYPT_SALT\"' >> .env \
+&& sed -i '/INTERNAL_API_KEY/d' .env && echo 'INTERNAL_API_KEY=\"$INTERNAL_API_KEY\"' >> .env \
+&& sed -i '/API_KEY_SALT/d' .env && echo 'API_KEY_SALT=\"$API_KEY_SALT\"' >> .env \
+&& sed -i '/NEXT_PUBLIC_BASE_URL/d' .env && echo 'NEXT_PUBLIC_BASE_URL=\"$PROJECT_URL\"' >> .env"
 
 sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_IP" "bash /root/deploy_build.sh"
 if [ $? -ne 0 ]; then
