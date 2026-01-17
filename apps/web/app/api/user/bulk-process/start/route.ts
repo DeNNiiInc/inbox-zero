@@ -27,4 +27,4 @@ export const POST = withEmailAccount("bulk-process/start", async (request) => {
   });
 
   return NextResponse.json({ jobId });
-});
+}, { allowOrgAdmins: true });

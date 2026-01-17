@@ -20,4 +20,4 @@ export const POST = withEmailAccount("bulk-process/resume", async (request) => {
   await resumeBulkProcessing(jobId, request.auth.emailAccountId);
 
   return NextResponse.json({ success: true });
-});
+}, { allowOrgAdmins: true });

@@ -6,7 +6,7 @@ import { getBulkProcessingStatus, pauseBulkProcessing } from "@/utils/bulk/bulk-
 export const GET = withEmailAccount("bulk-process/status", async (request) => {
   const status = await getBulkProcessingStatus(request.auth.emailAccountId);
   return NextResponse.json({ job: status });
-});
+}, { allowOrgAdmins: true });
 
 const actionSchema = z.object({
   action: z.literal("pause"),
@@ -28,4 +28,4 @@ export const POST = withEmailAccount("bulk-process/status/action", async (reques
   }
 
   return NextResponse.json({ success: true });
-});
+}, { allowOrgAdmins: true });
