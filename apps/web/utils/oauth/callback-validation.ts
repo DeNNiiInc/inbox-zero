@@ -13,13 +13,14 @@ interface ValidateCallbackParams {
 
 type ValidationResult =
   | {
+      success: false;
+      response: NextResponse;
+    }
+  | {
       success: true;
       targetUserId: string;
       code: string;
-    }
-  | {
-      success: false;
-      response: NextResponse;
+      decodedState: Record<string, unknown>;
     };
 
 export function validateOAuthCallback({
@@ -50,7 +51,7 @@ export function validateOAuthCallback({
   let decodedState: {
     userId: string;
     nonce: string;
-  };
+  } & Record<string, unknown>;
   try {
     decodedState = parseOAuthState(storedState);
   } catch (error) {
@@ -81,5 +82,6 @@ export function validateOAuthCallback({
     success: true,
     targetUserId: decodedState.userId,
     code,
+    decodedState,
   };
 }

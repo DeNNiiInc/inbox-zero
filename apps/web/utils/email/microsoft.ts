@@ -169,8 +169,7 @@ export class OutlookProvider implements EmailProvider {
     const messageIdWithBrackets = `<${cleanMessageId}>`;
 
     const response = await this.client
-      .getClient()
-      .api("/me/messages")
+      .api("/messages")
       .filter(
         `internetMessageId eq '${escapeODataString(messageIdWithBrackets)}'`,
       )
@@ -231,8 +230,7 @@ export class OutlookProvider implements EmailProvider {
     const response: { value: Message[] } = await withOutlookRetry(
       () =>
         this.client
-          .getClient()
-          .api("/me/mailFolders('sentitems')/messages")
+          .api("/mailFolders('sentitems')/messages")
           .select(MESSAGE_SELECT_FIELDS)
           .top(maxResults)
           .orderby("sentDateTime desc")
@@ -251,8 +249,7 @@ export class OutlookProvider implements EmailProvider {
     const response: { value: Message[] } = await withOutlookRetry(
       () =>
         this.client
-          .getClient()
-          .api("/me/mailFolders('inbox')/messages")
+          .api("/mailFolders('inbox')/messages")
           .select(MESSAGE_SELECT_FIELDS)
           .top(maxResults)
           .orderby("receivedDateTime desc")
@@ -282,7 +279,7 @@ export class OutlookProvider implements EmailProvider {
 
     let request = this.client
       .getClient()
-      .api("/me/mailFolders('sentitems')/messages")
+      .api("/mailFolders('sentitems')/messages")
       .select("id,conversationId")
       .top(maxResults)
       .orderby("sentDateTime desc");
@@ -338,8 +335,8 @@ export class OutlookProvider implements EmailProvider {
     const filter = filters.length ? filters.join(" and ") : undefined;
 
     // Get messages from Microsoft Graph API (well-known Sent Items folder)
-    let request = client
-      .api("/me/mailFolders('sentitems')/messages")
+    let request = this.client
+      .api("/mailFolders('sentitems')/messages")
       .select(MESSAGE_SELECT_FIELDS)
       .top(maxResults)
       .orderby("sentDateTime desc");
@@ -450,7 +447,7 @@ export class OutlookProvider implements EmailProvider {
       () =>
         this.client
           .getClient()
-          .api(`/me/messages/${messageId}`)
+          .api(`/messages/${messageId}`)
           .select("categories")
           .get(),
       this.logger,
@@ -600,7 +597,7 @@ export class OutlookProvider implements EmailProvider {
   }
 
   async markReadMessage(messageId: string): Promise<void> {
-    await this.client.getClient().api(`/me/messages/${messageId}`).patch({
+    await this.client.api(`/messages/${messageId}`).patch({
       isRead: true,
     });
   }
@@ -636,7 +633,7 @@ export class OutlookProvider implements EmailProvider {
     try {
       const escapedThreadId = escapeODataString(threadId);
       const response = await client
-        .api("/me/messages")
+        .api("/messages")
         .filter(
           `conversationId eq '${escapedThreadId}' and parentFolderId eq 'inbox'`,
         )
@@ -725,7 +722,7 @@ export class OutlookProvider implements EmailProvider {
       this.getLabels(),
       this.client
         .getClient()
-        .api("/me/messages")
+        .api("/messages")
         .filter(`conversationId eq '${escapeODataString(threadId)}'`)
         .select("id,categories")
         .get() as Promise<{
@@ -774,7 +771,7 @@ export class OutlookProvider implements EmailProvider {
   async deleteLabel(labelId: string): Promise<void> {
     await this.client
       .getClient()
-      .api(`/me/outlook/masterCategories/${labelId}`)
+      .api(`/outlook/masterCategories/${labelId}`)
       .delete();
   }
 
@@ -1068,8 +1065,7 @@ export class OutlookProvider implements EmailProvider {
 
   async getDrafts(options?: { maxResults?: number }): Promise<ParsedMessage[]> {
     const response: { value: Message[] } = await this.client
-      .getClient()
-      .api("/me/mailFolders/drafts/messages")
+      .api("/mailFolders/drafts/messages")
       .select(MESSAGE_SELECT_FIELDS)
       .top(options?.maxResults || 50)
       .get();
@@ -1220,12 +1216,12 @@ export class OutlookProvider implements EmailProvider {
       response = await client.api(options.pageToken).get();
     } else {
       // Determine endpoint and build filters based on query type
-      let endpoint = "/me/messages";
+      let endpoint = "/messages";
       const filters: string[] = [];
 
       // Route to appropriate endpoint based on type
       if (type === "sent") {
-        endpoint = "/me/mailFolders('sentitems')/messages";
+        endpoint = "/mailFolders('sentitems')/messages";
       } else if (type === "all") {
         // For "all" type, use default messages endpoint with folder filter
         filters.push(
@@ -1264,7 +1260,7 @@ export class OutlookProvider implements EmailProvider {
       const filter = filters.length > 0 ? filters.join(" and ") : undefined;
 
       // Build the request
-      let request = client
+      let request = this.client
         .api(endpoint)
         .select(MESSAGE_SELECT_FIELDS)
         .top(options.maxResults || 50);
@@ -1402,8 +1398,7 @@ export class OutlookProvider implements EmailProvider {
 
         const [sentResponse, receivedResponse] = await Promise.all([
           this.client
-            .getClient()
-            .api("/me/messages")
+            .api("/messages")
             .search(`"to:@${escapedKqlDomain}"`)
             .top(5)
             .select("id,sentDateTime")
@@ -1416,8 +1411,7 @@ export class OutlookProvider implements EmailProvider {
             }),
 
           this.client
-            .getClient()
-            .api("/me/messages")
+            .api("/messages")
             .search(`"from:@${escapedKqlDomain}"`)
             .top(5)
             .select("id,receivedDateTime")
@@ -1461,8 +1455,7 @@ export class OutlookProvider implements EmailProvider {
 
       const [sentResponse, receivedResponse] = await Promise.all([
         this.client
-          .getClient()
-          .api("/me/messages")
+          .api("/messages")
           .search(sentSearch)
           .top(5) // Increase top to account for potential future messages we filter out
           .select("id,sentDateTime")
@@ -1476,8 +1469,7 @@ export class OutlookProvider implements EmailProvider {
           }),
 
         this.client
-          .getClient()
-          .api("/me/messages")
+          .api("/messages")
           .filter(receivedFilter)
           .top(2)
           .select("id")
@@ -1560,6 +1552,7 @@ export class OutlookProvider implements EmailProvider {
     const subscription = await watchOutlook(
       this.client.getClient(),
       this.logger,
+      this.client.getMailboxAddress(),
     );
 
     if (subscription.expirationDateTime) {
@@ -1614,7 +1607,7 @@ export class OutlookProvider implements EmailProvider {
 
   async archiveMessage(messageId: string): Promise<void> {
     try {
-      await this.client.getClient().api(`/me/messages/${messageId}/move`).post({
+      await this.client.api(`/messages/${messageId}/move`).post({
         destinationId: "archive",
       });
 

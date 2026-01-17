@@ -67,6 +67,7 @@ export async function getOutlookClientForEmail({
     refreshToken: tokens.refreshToken || "",
     expiresAt: tokens.expiresAt,
     emailAccountId,
+    mailboxAddress: tokens.mailboxAddress,
     logger,
   });
   return outlook;
@@ -85,6 +86,7 @@ export async function getOutlookAndAccessTokenForEmail({
     refreshToken: tokens.refreshToken || "",
     expiresAt: tokens.expiresAt,
     emailAccountId,
+    mailboxAddress: tokens.mailboxAddress,
     logger,
   });
   const accessToken = getOutlookAccessToken(outlook);
@@ -104,6 +106,7 @@ export async function getOutlookClientForEmailId({
       account: {
         select: { access_token: true, refresh_token: true, expires_at: true },
       },
+      mailboxAddress: true,
     },
   });
   const outlook = await getOutlookClientWithRefresh({
@@ -111,6 +114,7 @@ export async function getOutlookClientForEmailId({
     refreshToken: account?.account.refresh_token || "",
     expiresAt: account?.account.expires_at?.getTime() ?? null,
     emailAccountId,
+    mailboxAddress: account?.mailboxAddress,
     logger,
   });
   return outlook;
@@ -123,6 +127,7 @@ async function getTokens({ emailAccountId }: { emailAccountId: string }) {
       account: {
         select: { access_token: true, refresh_token: true, expires_at: true },
       },
+      mailboxAddress: true,
     },
   });
 
@@ -130,6 +135,7 @@ async function getTokens({ emailAccountId }: { emailAccountId: string }) {
     accessToken: emailAccount?.account.access_token,
     refreshToken: emailAccount?.account.refresh_token,
     expiresAt: emailAccount?.account.expires_at?.getTime() ?? null,
+    mailboxAddress: emailAccount?.mailboxAddress,
   };
 }
 

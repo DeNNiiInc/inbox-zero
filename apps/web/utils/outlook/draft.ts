@@ -23,8 +23,7 @@ export async function getDraft({
       withOutlookRetry(
         () =>
           client
-            .getClient()
-            .api(`/me/messages/${draftId}`)
+            .api(`/messages/${draftId}`)
             .get() as Promise<Message>,
         logger,
       ),
@@ -71,7 +70,7 @@ export async function deleteDraft({
     // DELETE moves the draft to Deleted Items folder
     // getDraft will return null for drafts in Deleted Items, treating them as deleted
     await withOutlookRetry(
-      () => client.getClient().api(`/me/messages/${draftId}`).delete(),
+      () => client.api(`/messages/${draftId}`).delete(),
       logger,
     );
     logger.info("Successfully deleted draft", { draftId });

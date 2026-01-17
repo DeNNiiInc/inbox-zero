@@ -18,8 +18,7 @@ export async function trashThread(options: {
     // Escape single quotes in threadId for the filter
     const escapedThreadId = threadId.replace(/'/g, "''");
     const messages = await client
-      .getClient()
-      .api("/me/messages")
+      .api("/messages")
       .filter(`conversationId eq '${escapedThreadId}'`)
       .get();
 
@@ -28,7 +27,7 @@ export async function trashThread(options: {
         try {
           return await withOutlookRetry(
             () =>
-              client.getClient().api(`/me/messages/${message.id}/move`).post({
+              client.api(`/messages/${message.id}/move`).post({
                 destinationId: "deleteditems",
               }),
             logger,
@@ -96,8 +95,7 @@ export async function trashThread(options: {
     try {
       // Try to get messages by conversationId using a different endpoint
       const messages = await client
-        .getClient()
-        .api("/me/messages")
+        .api("/messages")
         .select("id")
         .get();
 
@@ -115,8 +113,7 @@ export async function trashThread(options: {
               return await withOutlookRetry(
                 () =>
                   client
-                    .getClient()
-                    .api(`/me/messages/${message.id}/move`)
+                    .api(`/messages/${message.id}/move`)
                     .post({
                       destinationId: "deleteditems",
                     }),
@@ -140,7 +137,7 @@ export async function trashThread(options: {
         // If no messages found, try treating threadId as a messageId
         await withOutlookRetry(
           () =>
-            client.getClient().api(`/me/messages/${threadId}/move`).post({
+            client.api(`/messages/${threadId}/move`).post({
               destinationId: "deleteditems",
             }),
           logger,

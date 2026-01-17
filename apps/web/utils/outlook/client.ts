@@ -15,12 +15,14 @@ export class OutlookClient {
   private readonly client: Client;
   private readonly accessToken: string;
   private readonly logger: Logger;
+  private readonly mailboxAddress: string;
   private folderIdCache: Record<string, string> | null = null;
   private categoryMapCache: Map<string, string> | null = null;
 
-  constructor(accessToken: string, logger: Logger) {
+  constructor(accessToken: string, logger: Logger, mailboxAddress = "me") {
     this.accessToken = accessToken;
     this.logger = logger;
+    this.mailboxAddress = mailboxAddress;
     this.client = Client.init({
       authProvider: (done) => {
         done(null, this.accessToken);
@@ -42,6 +44,25 @@ export class OutlookClient {
 
   getAccessToken(): string {
     return this.accessToken;
+  }
+
+  getMailboxAddress(): string {
+    return this.mailboxAddress;
+  }
+
+  /**
+   * Helper to create a Graph API request with the correct mailbox root.
+   * If mailboxAddress is NOT "me", it uses "/users/{mailboxAddress}".
+   */
+  api(path: string) {
+    const root =
+      this.mailboxAddress === "me"
+        ? "/me"
+        : `/users/${this.mailboxAddress}`;
+    
+    // Ensure path starts with / if not already
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    return this.client.api(`${root}${normalizedPath}`);
   }
 
   getFolderIdCache(): Record<string, string> | null {
@@ -90,9 +111,13 @@ export class OutlookClient {
 }
 
 // Helper to create OutlookClient instance
-export const createOutlookClient = (accessToken: string, logger: Logger) => {
+export const createOutlookClient = (
+  accessToken: string,
+  logger: Logger,
+  mailboxAddress?: string,
+) => {
   if (!accessToken) throw new SafeError("No access token provided");
-  return new OutlookClient(accessToken, logger);
+  return new OutlookClient(accessToken, logger, mailboxAddress);
 };
 
 // Similar to Gmail's getGmailClientWithRefresh
@@ -101,12 +126,14 @@ export const getOutlookClientWithRefresh = async ({
   refreshToken,
   expiresAt,
   emailAccountId,
+  mailboxAddress,
   logger,
 }: {
   accessToken?: string | null;
   refreshToken: string | null;
   expiresAt: number | null;
   emailAccountId: string;
+  mailboxAddress?: string;
   logger: Logger;
 }): Promise<OutlookClient> => {
   if (!refreshToken) {
@@ -121,7 +148,7 @@ export const getOutlookClientWithRefresh = async ({
     expiryDate &&
     expiryDate > Date.now() + TOKEN_REFRESH_BUFFER_MS
   ) {
-    return createOutlookClient(accessToken, logger);
+    return createOutlookClient(accessToken, logger, mailboxAddress);
   }
 
   // Refresh token

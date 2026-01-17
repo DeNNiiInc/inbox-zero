@@ -42,7 +42,7 @@ export async function createFilter(options: {
 
     const response: MessageRule = await withOutlookRetry(
       () =>
-        client.getClient().api("/me/mailFolders/inbox/messageRules").post(rule),
+        client.api("/mailFolders/inbox/messageRules").post(rule),
       logger,
     );
 
@@ -85,7 +85,7 @@ export async function createAutoArchiveFilter({
 
     const response: MessageRule = await withOutlookRetry(
       () =>
-        client.getClient().api("/me/mailFolders/inbox/messageRules").post(rule),
+        client.api("/mailFolders/inbox/messageRules").post(rule),
       logger,
     );
 
@@ -112,8 +112,7 @@ export async function deleteFilter({
     await withOutlookRetry(
       () =>
         client
-          .getClient()
-          .api(`/me/mailFolders/inbox/messageRules/${id}`)
+          .api(`/mailFolders/inbox/messageRules/${id}`)
           .delete(),
       logger,
     );
@@ -134,8 +133,7 @@ export async function getFiltersList({
 }) {
   try {
     const response: { value: MessageRule[] } = await client
-      .getClient()
-      .api("/me/mailFolders/inbox/messageRules")
+      .api("/mailFolders/inbox/messageRules")
       .get();
 
     return response;
@@ -165,8 +163,7 @@ export async function createCategoryFilter({
   try {
     // First, ensure the category exists
     const categories: { value: OutlookCategory[] } = await client
-      .getClient()
-      .api("/me/outlook/masterCategories")
+      .api("/outlook/masterCategories")
       .get();
 
     let category = categories.value.find(
@@ -177,7 +174,7 @@ export async function createCategoryFilter({
       // Create the category if it doesn't exist
       category = await withOutlookRetry(
         () =>
-          client.getClient().api("/me/outlook/masterCategories").post({
+          client.api("/outlook/masterCategories").post({
             displayName: categoryName,
             color: "preset0", // Default color
           }),
@@ -249,8 +246,7 @@ export async function updateFilter({
     const response: MessageRule = await withOutlookRetry(
       () =>
         client
-          .getClient()
-          .api(`/me/mailFolders/inbox/messageRules/${id}`)
+          .api(`/mailFolders/inbox/messageRules/${id}`)
           .patch(rule),
       logger,
     );

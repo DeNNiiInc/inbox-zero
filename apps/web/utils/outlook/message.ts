@@ -38,8 +38,7 @@ export async function getFolderIds(client: OutlookClient, logger: Logger) {
     Object.entries(WELL_KNOWN_FOLDERS).map(async ([key, folderName]) => {
       try {
         const response = await client
-          .getClient()
-          .api(`/me/mailFolders/${folderName}`)
+          .api(`/mailFolders/${folderName}`)
           .select("id")
           .get();
         return [key, response.id];
@@ -75,7 +74,7 @@ export async function getCategoryMap(
 
   try {
     const response: { value: Array<{ id?: string; displayName?: string }> } =
-      await client.getClient().api("/me/outlook/masterCategories").get();
+      await client.api("/outlook/masterCategories").get();
 
     const categoryMap = new Map<string, string>();
     for (const category of response.value) {
@@ -630,8 +629,7 @@ export async function getMessages(
  */
 export function createMessagesRequest(client: OutlookClient) {
   return client
-    .getClient()
-    .api("/me/messages")
+    .api("/messages")
     .select(MESSAGE_SELECT_FIELDS)
     .expand(MESSAGE_EXPAND_ATTACHMENTS);
 }
@@ -641,8 +639,7 @@ export function createMessagesRequest(client: OutlookClient) {
  */
 export function createMessageRequest(client: OutlookClient, messageId: string) {
   return client
-    .getClient()
-    .api(`/me/messages/${messageId}`)
+    .api(`/messages/${messageId}`)
     .select(MESSAGE_SELECT_FIELDS)
     .expand(MESSAGE_EXPAND_ATTACHMENTS);
 }

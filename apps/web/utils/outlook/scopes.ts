@@ -9,7 +9,10 @@ export const SCOPES = [
   "User.Read",
   "offline_access", // Required for refresh tokens
   "Mail.ReadWrite", // Read and write access to mailbox
-  ...(env.NEXT_PUBLIC_EMAIL_SEND_ENABLED ? ["Mail.Send"] : []), // Send emails
+  "Mail.ReadWrite.Shared", // Read and write access to shared mailboxes
+  ...(env.NEXT_PUBLIC_EMAIL_SEND_ENABLED
+    ? ["Mail.Send", "Mail.Send.Shared"]
+    : []), // Send emails (including shared)
 ] as const;
 
 export const CALENDAR_SCOPES = [

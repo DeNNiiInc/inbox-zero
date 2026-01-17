@@ -5,7 +5,11 @@ import { env } from "@/env";
 import { withOutlookRetry } from "@/utils/outlook/retry";
 import type { Logger } from "@/utils/logger";
 
-export async function watchOutlook(client: Client, logger: Logger) {
+export async function watchOutlook(
+  client: Client,
+  logger: Logger,
+  mailboxAddress = "me",
+) {
   const base = env.WEBHOOK_URL || env.NEXT_PUBLIC_BASE_URL;
 
   // must be https
@@ -17,7 +21,8 @@ export async function watchOutlook(client: Client, logger: Logger) {
   const subscriptionPayload = {
     changeType: "created,updated",
     notificationUrl: notificationUrl.toString(),
-    resource: "/me/messages",
+    resource:
+      mailboxAddress === "me" ? "/me/messages" : `/users/${mailboxAddress}/messages`,
     expirationDateTime: addDays(new Date(), 3).toISOString(), // 3 days (max allowed)
     clientState: env.MICROSOFT_WEBHOOK_CLIENT_STATE,
   };
