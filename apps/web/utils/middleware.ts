@@ -241,7 +241,11 @@ async function emailAccountMiddleware(
     if (!callerEmailAccount) {
       emailAccountLogger.error("Org admin access denied");
       return NextResponse.json(
-        { error: "Insufficient permissions", isKnownError: true },
+        { 
+          error: "Insufficient permissions", 
+          isKnownError: true,
+          debug: { userId, emailAccountId }
+        },
         { status: 403 },
       );
     }
