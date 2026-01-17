@@ -28,7 +28,6 @@ npx prisma db push --accept-data-loss
 
 # Start the application using pnpm start
 echo "Starting application..."
-cd apps/web
 export NODE_ENV=production
 nohup /usr/bin/pnpm run start > /var/log/inbox-zero.log 2>&1 &
 sleep 3
