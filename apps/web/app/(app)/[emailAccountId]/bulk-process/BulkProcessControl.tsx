@@ -22,8 +22,15 @@ export function BulkProcessControl({ emailAccountId }: BulkProcessControlProps) 
   const [skipArchive, setSkipArchive] = useState<boolean>(false);
   const [isLoadingAction, setIsLoadingAction] = useState(false);
 
+  const fetcher = (url: string) => fetch(url, {
+    headers: { 
+      [EMAIL_ACCOUNT_HEADER]: emailAccountId 
+    }
+  }).then((res) => res.json());
+
   const { data, error, mutate } = useSWR<{ job: any }>(
     `/api/user/bulk-process/status`,
+    fetcher,
     { refreshInterval: 2000 }
   );
 
