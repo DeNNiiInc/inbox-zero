@@ -11,6 +11,8 @@ mkdir -p "$BUILD_DIR"
 echo "Extracting git version info..."
 GIT_COMMIT_SHORT=$(git log -1 --format="%h" | cut -c1-10)
 GIT_COMMIT_DATE=$(git log -1 --format="%ci")
+# Remove any previous git version lines, then append fresh values
+sed -i '/^NEXT_PUBLIC_GIT_COMMIT=/d; /^NEXT_PUBLIC_GIT_DATE=/d' apps/web/.env
 echo "NEXT_PUBLIC_GIT_COMMIT=$GIT_COMMIT_SHORT" >> apps/web/.env
 echo "NEXT_PUBLIC_GIT_DATE=$GIT_COMMIT_DATE" >> apps/web/.env
 echo "Git version: $GIT_COMMIT_SHORT ($GIT_COMMIT_DATE)"
