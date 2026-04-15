@@ -1,12 +1,28 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import {
   delayInMinutesSchema,
   createRuleBody,
   type CreateRuleBody,
+  updateRuleConditionSchema,
 } from "./rule.validation";
 import { ActionType, LogicalOperator } from "@/generated/prisma/enums";
 import { ConditionType } from "@/utils/config";
 import { NINETY_DAYS_MINUTES } from "@/utils/date";
+import { WEBHOOK_ACTION_DISABLED_MESSAGE } from "@/utils/webhook-action";
+
+const { mockEnv } = vi.hoisted(() => ({
+  mockEnv: {
+    webhookActionsEnabled: true,
+  },
+}));
+
+vi.mock("@/env", () => ({
+  env: {
+    get NEXT_PUBLIC_WEBHOOK_ACTION_ENABLED() {
+      return mockEnv.webhookActionsEnabled;
+    },
+  },
+}));
 
 describe("delayInMinutesSchema", () => {
   describe("valid values", () => {
@@ -188,6 +204,10 @@ describe("createRuleBody", () => {
   });
 
   describe("action-specific validation (superRefine)", () => {
+    beforeEach(() => {
+      mockEnv.webhookActionsEnabled = true;
+    });
+
     describe("LABEL action", () => {
       it("requires labelId value for LABEL action", () => {
         const result = createRuleBody.safeParse({
@@ -253,6 +273,40 @@ describe("createRuleBody", () => {
       });
     });
 
+    describe("SEND_EMAIL action", () => {
+      it("requires to.value for SEND_EMAIL action", () => {
+        const result = createRuleBody.safeParse({
+          ...validRule,
+          actions: [
+            {
+              type: ActionType.SEND_EMAIL,
+              subject: { value: "Hello" },
+              content: { value: "World" },
+            },
+          ],
+        });
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.issues[0].message).toContain("send to");
+        }
+      });
+
+      it("accepts valid to.value for SEND_EMAIL action", () => {
+        const result = createRuleBody.safeParse({
+          ...validRule,
+          actions: [
+            {
+              type: ActionType.SEND_EMAIL,
+              to: { value: "recipient@example.com" },
+              subject: { value: "Hello" },
+              content: { value: "World" },
+            },
+          ],
+        });
+        expect(result.success).toBe(true);
+      });
+    });
+
     describe("CALL_WEBHOOK action", () => {
       it("requires url.value for CALL_WEBHOOK action", () => {
         const result = createRuleBody.safeParse({
@@ -276,6 +330,28 @@ describe("createRuleBody", () => {
           ],
         });
         expect(result.success).toBe(true);
+      });
+
+      it("rejects CALL_WEBHOOK when webhook actions are disabled", () => {
+        mockEnv.webhookActionsEnabled = false;
+
+        const result = createRuleBody.safeParse({
+          ...validRule,
+          actions: [
+            {
+              type: ActionType.CALL_WEBHOOK,
+              url: { value: "https://api.example.com/webhook" },
+            },
+          ],
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.issues[0].message).toBe(
+            WEBHOOK_ACTION_DISABLED_MESSAGE,
+          );
+          expect(result.error.issues[0].path).toEqual(["actions", 0, "type"]);
+        }
       });
     });
 
@@ -388,5 +464,24 @@ describe("createRuleBody", () => {
         expect(result.data.conditionalOperator).toBeUndefined();
       }
     });
+  });
+});
+
+describe("updateRuleConditionSchema", () => {
+  it("accepts null aiInstructions for sender-only updates", () => {
+    const result = updateRuleConditionSchema.safeParse({
+      ruleName: "Newsletters",
+      condition: {
+        aiInstructions: null,
+        static: {
+          from: "@briefing.example",
+          to: null,
+          subject: null,
+        },
+        conditionalOperator: null,
+      },
+    });
+
+    expect(result.success).toBe(true);
   });
 });

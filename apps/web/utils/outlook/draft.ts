@@ -23,7 +23,8 @@ export async function getDraft({
       withOutlookRetry(
         () =>
           client
-            .api(`/messages/${draftId}`)
+            .getClient()
+            .api(`/me/messages/${draftId}`)
             .get() as Promise<Message>,
         logger,
       ),
@@ -31,14 +32,11 @@ export async function getDraft({
       getCategoryMap(client, logger),
     ]);
 
-    // Treat drafts in Deleted Items as deleted - return null
-    // DELETE moves messages to Deleted Items, so this ensures getDraft returns null
-    // after deleteDraft is called
-    if (
-      folderIds.deleteditems &&
-      response.parentFolderId === folderIds.deleteditems
-    ) {
-      logger.info("Draft is in Deleted Items folder, treating as deleted.", {
+    // Treat drafts NOT in Drafts folder as "deleted" - when a draft is sent or deleted,
+    // it gets moved to another folder (Sent Items, Deleted Items, Outbox, etc.)
+    // For draft cleanup purposes, we only care about drafts in the Drafts folder
+    if (folderIds.drafts && response.parentFolderId !== folderIds.drafts) {
+      logger.info("Draft is no longer in Drafts folder, treating as deleted.", {
         draftId,
       });
       return null;
@@ -56,6 +54,48 @@ export async function getDraft({
   }
 }
 
+export async function sendDraft({
+  client,
+  draftId,
+  logger,
+}: {
+  client: OutlookClient;
+  draftId: string;
+  logger: Logger;
+}): Promise<{ messageId: string; threadId: string }> {
+  logger.info("Sending draft", { draftId });
+
+  // Send the draft - this moves it from Drafts to Sent Items
+  // The message ID stays the same after sending
+  await withOutlookRetry(
+    () => client.getClient().api(`/me/messages/${draftId}/send`).post({}),
+    logger,
+  );
+
+  // Get the sent message to retrieve the conversationId (threadId)
+  const sentMessage = await withOutlookRetry(
+    () =>
+      client
+        .getClient()
+        .api(`/me/messages/${draftId}`)
+        .get() as Promise<Message>,
+    logger,
+  );
+
+  const threadId = sentMessage.conversationId;
+  if (!threadId) {
+    throw new Error("Failed to get threadId from sent message");
+  }
+
+  logger.info("Draft sent successfully", {
+    draftId,
+    messageId: draftId,
+    threadId,
+  });
+
+  return { messageId: draftId, threadId };
+}
+
 export async function deleteDraft({
   client,
   draftId,
@@ -67,18 +107,18 @@ export async function deleteDraft({
 }) {
   try {
     logger.info("Deleting draft", { draftId });
-    // DELETE moves the draft to Deleted Items folder
-    // getDraft will return null for drafts in Deleted Items, treating them as deleted
+
+    // DELETE moves the draft to Deleted Items folder (not permanently deleted)
+    // This is fine - getDraft() treats drafts not in Drafts folder as "deleted"
     await withOutlookRetry(
-      () => client.api(`/messages/${draftId}`).delete(),
+      () => client.getClient().api(`/me/messages/${draftId}`).delete(),
       logger,
     );
-    logger.info("Successfully deleted draft", { draftId });
+
+    logger.info("Draft deleted successfully", { draftId });
   } catch (error) {
     if (isNotFoundError(error)) {
-      logger.warn("Draft not found or already deleted, skipping deletion.", {
-        draftId,
-      });
+      logger.info("Draft not found or already deleted", { draftId });
       return;
     }
 

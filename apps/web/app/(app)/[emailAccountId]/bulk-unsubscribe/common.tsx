@@ -1,6 +1,7 @@
 "use client";
 
 import type React from "react";
+import { useState } from "react";
 import Link from "next/link";
 import {
   ArchiveIcon,
@@ -33,20 +34,23 @@ import { NewsletterStatus } from "@/generated/prisma/enums";
 import { toastError, toastSuccess } from "@/components/Toast";
 import { createFilterAction } from "@/utils/actions/mail";
 import { getGmailSearchUrl } from "@/utils/url";
+import { extractNameFromEmail } from "@/utils/email";
 import { Badge } from "@/components/ui/badge";
 import type { Row } from "@/app/(app)/[emailAccountId]/bulk-unsubscribe/types";
+import type { NewsletterFilterType } from "@/app/(app)/[emailAccountId]/bulk-unsubscribe/types";
 import {
   useUnsubscribe,
   useApproveButton,
   useBulkArchive,
   useBulkDelete,
-  type NewsletterFilterType,
 } from "@/app/(app)/[emailAccountId]/bulk-unsubscribe/hooks";
+import { ResubscribeDialog } from "@/app/(app)/[emailAccountId]/bulk-unsubscribe/ResubscribeDialog";
 import { LabelsSubMenu } from "@/components/LabelsSubMenu";
-import type { EmailLabel } from "@/providers/EmailProvider";
+import type { EmailLabel } from "@/providers/email-label-types";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import { isGoogleProvider } from "@/utils/email/provider-types";
 import { getEmailTerminology } from "@/utils/terminology";
+import { Tooltip } from "@/components/Tooltip";
 
 export function ActionCell<T extends Row>({
   item,
@@ -134,6 +138,8 @@ function UnsubscribeButton<T extends Row>({
   posthog: PostHog;
   emailAccountId: string;
 }) {
+  const [resubscribeDialogOpen, setResubscribeDialogOpen] = useState(false);
+
   const { unsubscribeLoading, onUnsubscribe, unsubscribeLink } = useUnsubscribe(
     {
       item,
@@ -154,23 +160,52 @@ function UnsubscribeButton<T extends Row>({
       ? "Unsubscribe"
       : "Block";
 
-  return (
-    <Button
-      size="sm"
-      variant="outline"
-      className="w-[110px] justify-center"
-      asChild
-    >
-      <Link
-        href={unsubscribeLink}
-        target={hasUnsubscribeLink && !isUnsubscribed ? "_blank" : undefined}
-        onClick={onUnsubscribe}
-        rel="noreferrer"
+  const senderName = item.fromName || extractNameFromEmail(item.name);
+
+  // Show Resubscribe button if unsubscribed, otherwise show Unsubscribe/Block button
+  const button =
+    isUnsubscribed || resubscribeDialogOpen ? (
+      <Button
+        size="sm"
+        variant="outline"
+        className="w-[110px] justify-center"
+        onClick={() => setResubscribeDialogOpen(true)}
       >
         {unsubscribeLoading && <ButtonLoader />}
-        {buttonText}
-      </Link>
-    </Button>
+        Resubscribe
+      </Button>
+    ) : (
+      <Button
+        size="sm"
+        variant="outline"
+        className="w-[110px] justify-center"
+        asChild
+      >
+        <Link
+          href={unsubscribeLink}
+          target={hasUnsubscribeLink ? "_blank" : undefined}
+          onClick={onUnsubscribe}
+          rel="noopener noreferrer"
+        >
+          {unsubscribeLoading && <ButtonLoader />}
+          {buttonText}
+        </Link>
+      </Button>
+    );
+
+  return (
+    <>
+      {button}
+
+      <ResubscribeDialog
+        open={resubscribeDialogOpen}
+        onOpenChange={setResubscribeDialogOpen}
+        senderName={senderName}
+        newsletterEmail={item.name}
+        emailAccountId={emailAccountId}
+        mutate={mutate}
+      />
+    </>
   );
 }
 
@@ -198,14 +233,24 @@ function ApproveButton<T extends Row>({
   });
 
   return (
-    <Button
-      size="sm"
-      variant={isApproved ? "green" : "ghost"}
-      onClick={onApprove}
-      disabled={!hasUnsubscribeAccess}
+    <Tooltip
+      content={
+        isApproved
+          ? "Approved sender. Keep these emails in your inbox."
+          : "Approve sender to keep these emails in your inbox."
+      }
     >
-      <ThumbsUpIcon className={`size-5 ${isApproved ? "" : "text-gray-400"}`} />
-    </Button>
+      <Button
+        size="sm"
+        variant={isApproved ? "green" : "ghost"}
+        onClick={onApprove}
+        disabled={!hasUnsubscribeAccess}
+      >
+        <ThumbsUpIcon
+          className={`size-5 ${isApproved ? "" : "text-gray-400"}`}
+        />
+      </Button>
+    </Tooltip>
   );
 }
 
@@ -224,14 +269,14 @@ export function MoreDropdown<T extends Row>({
   emailAccountId: string;
   labels: EmailLabel[];
   posthog: PostHog;
-  mutate: () => Promise<void>;
+  mutate: () => Promise<unknown>;
 }) {
   const { provider } = useAccount();
   const terminology = getEmailTerminology(provider);
   const { onBulkArchive, isBulkArchiving } = useBulkArchive({
-    mutate,
     posthog,
     emailAccountId,
+    mutate,
   });
   const { onBulkDelete, isBulkDeleting } = useBulkDelete({
     mutate,
@@ -358,53 +403,3 @@ export function HeaderButton(props: {
     </Button>
   );
 }
-
-// function GroupsSubMenu({ sender }: { sender: string }) {
-//   const { data, isLoading, error } = useSWR<GroupsResponse>("/api/user/group");
-
-//   return (
-//     <DropdownMenuSubContent>
-//       {data &&
-//         (data.groups.length ? (
-//           data?.groups.map((group) => {
-//             return (
-//               <DropdownMenuItem
-//                 key={group.id}
-//                 onClick={async () => {
-//                   const result = await addGroupItemAction(emailAccountId, {
-//                     groupId: group.id,
-//                     type: GroupItemType.FROM,
-//                     value: sender,
-//                   });
-
-//                   if (result?.serverError) {
-//                     toastError({
-//                       description: `Failed to add ${sender} to ${group.name}. ${result.error}`,
-//                     });
-//                   } else {
-//                     toastSuccess({
-//                       title: "Success!",
-//                       description: `Added ${sender} to ${group.name}`,
-//                     });
-//                   }
-//                 }}
-//               >
-//                 {group.name}
-//               </DropdownMenuItem>
-//             );
-//           })
-//         ) : (
-//           <DropdownMenuItem>{`You don't have any groups yet.`}</DropdownMenuItem>
-//         ))}
-//       {isLoading && <DropdownMenuItem>Loading...</DropdownMenuItem>}
-//       {error && <DropdownMenuItem>Error loading groups</DropdownMenuItem>}
-//       <DropdownMenuSeparator />
-//       <DropdownMenuItem asChild>
-//         <Link href={prefixPath(emailAccountId, "/automation?tab=groups")} target="_blank">
-//           <PlusCircle className="mr-2 size-4" />
-//           <span>New Group</span>
-//         </Link>
-//       </DropdownMenuItem>
-//     </DropdownMenuSubContent>
-//   );
-// }

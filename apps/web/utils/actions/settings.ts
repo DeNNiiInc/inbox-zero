@@ -8,7 +8,7 @@ import {
   updateDigestItemsBody,
   toggleDigestBody,
 } from "@/utils/actions/settings.validation";
-import { DEFAULT_PROVIDER } from "@/utils/llms/config";
+import { DEFAULT_PROVIDER, Provider } from "@/utils/llms/config";
 import prisma from "@/utils/prisma";
 import {
   calculateNextScheduleDate,
@@ -18,6 +18,9 @@ import { actionClientUser } from "@/utils/actions/safe-action";
 import { ActionType, SystemType } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
 import { clearSpecificErrorMessages, ErrorType } from "@/utils/error-messages";
+import { SafeError } from "@/utils/error";
+import { env } from "@/env";
+import { addActionOwnershipToInput } from "@/utils/rule/rule";
 
 export const updateEmailSettingsAction = actionClient
   .metadata({ name: "updateEmailSettings" })
@@ -45,23 +48,57 @@ export const updateAiSettingsAction = actionClientUser
       ctx: { userId, logger },
       parsedInput: { aiProvider, aiModel, aiApiKey },
     }) => {
-      await prisma.user.update({
+      if (aiProvider === Provider.AZURE && !env.AZURE_RESOURCE_NAME) {
+        throw new Error(
+          "Azure provider requires AZURE_RESOURCE_NAME to be configured on the server",
+        );
+      }
+
+      const providedAiApiKey = aiApiKey?.trim() || null;
+
+      let nextAiApiKey: string | null = providedAiApiKey;
+
+      if (!nextAiApiKey && aiProvider !== DEFAULT_PROVIDER) {
+        const existingUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { aiProvider: true, aiApiKey: true },
+        });
+
+        if (!existingUser) throw new SafeError("User not found");
+
+        nextAiApiKey =
+          existingUser.aiProvider === aiProvider ? existingUser.aiApiKey : null;
+
+        if (!nextAiApiKey) {
+          throw new SafeError("You must provide an API key for this provider");
+        }
+      }
+
+      const result = await prisma.user.updateMany({
         where: { id: userId },
         data:
           aiProvider === DEFAULT_PROVIDER
             ? { aiProvider: null, aiModel: null, aiApiKey: null }
-            : { aiProvider, aiModel, aiApiKey },
+            : { aiProvider, aiModel, aiApiKey: nextAiApiKey },
       });
+
+      if (result.count === 0) {
+        throw new SafeError("User not found");
+      }
 
       // Clear AI-related error messages when user updates their settings
       // This allows them to be notified again if the new settings are also invalid
       await clearSpecificErrorMessages({
         userId,
         errorTypes: [
-          ErrorType.INCORRECT_OPENAI_API_KEY,
+          ErrorType.INCORRECT_API_KEY,
           ErrorType.INVALID_AI_MODEL,
-          ErrorType.OPENAI_API_KEY_DEACTIVATED,
+          ErrorType.API_KEY_DEACTIVATED,
           ErrorType.AI_QUOTA_ERROR,
+          ErrorType.INSUFFICIENT_CREDITS,
+          // Legacy keys for old stored errors
+          ErrorType.INCORRECT_OPENAI_API_KEY,
+          ErrorType.OPENAI_API_KEY_DEACTIVATED,
           ErrorType.ANTHROPIC_INSUFFICIENT_BALANCE,
         ],
         logger,
@@ -130,10 +167,13 @@ export const updateDigestItemsAction = actionClient
           if (enabled && !hasDigestAction) {
             // Add DIGEST action
             await prisma.action.create({
-              data: {
-                ruleId: rule.id,
-                type: ActionType.DIGEST,
-              },
+              data: addActionOwnershipToInput(
+                {
+                  ruleId: rule.id,
+                  type: ActionType.DIGEST,
+                },
+                emailAccountId,
+              ),
             });
           } else if (!enabled && hasDigestAction) {
             // Remove DIGEST action
@@ -155,47 +195,58 @@ export const updateDigestItemsAction = actionClient
 export const toggleDigestAction = actionClient
   .metadata({ name: "toggleDigest" })
   .inputSchema(toggleDigestBody)
-  .action(async ({ ctx: { emailAccountId }, parsedInput: { enabled } }) => {
-    if (enabled) {
-      const defaultSchedule = {
-        intervalDays: 1,
-        occurrences: 1,
-        daysOfWeek: 127,
-        timeOfDay: createCanonicalTimeOfDay(9, 0),
-      };
+  .action(
+    async ({
+      ctx: { emailAccountId },
+      parsedInput: { enabled, timeOfDay },
+    }) => {
+      if (enabled) {
+        const defaultSchedule = {
+          intervalDays: 1,
+          occurrences: 1,
+          daysOfWeek: 127,
+          timeOfDay: timeOfDay ?? createCanonicalTimeOfDay(9, 0),
+        };
 
-      await prisma.schedule.upsert({
-        where: { emailAccountId },
-        create: {
-          emailAccountId,
-          ...defaultSchedule,
-          lastOccurrenceAt: new Date(),
-          nextOccurrenceAt: calculateNextScheduleDate({
+        await prisma.schedule.upsert({
+          where: { emailAccountId },
+          create: {
+            emailAccountId,
             ...defaultSchedule,
-            lastOccurrenceAt: null,
-          }),
-        },
-        update: {},
-      });
+            lastOccurrenceAt: new Date(),
+            nextOccurrenceAt: calculateNextScheduleDate({
+              ...defaultSchedule,
+              lastOccurrenceAt: null,
+            }),
+          },
+          update: {},
+        });
 
-      const newsletterRule = await prisma.rule.findFirst({
-        where: { emailAccountId, systemType: SystemType.NEWSLETTER },
-        include: { actions: true },
-      });
+        const newsletterRule = await prisma.rule.findFirst({
+          where: { emailAccountId, systemType: SystemType.NEWSLETTER },
+          include: { actions: true },
+        });
 
-      if (
-        newsletterRule &&
-        !newsletterRule.actions.some((a) => a.type === ActionType.DIGEST)
-      ) {
-        await prisma.action.create({
-          data: { ruleId: newsletterRule.id, type: ActionType.DIGEST },
+        if (
+          newsletterRule &&
+          !newsletterRule.actions.some((a) => a.type === ActionType.DIGEST)
+        ) {
+          await prisma.action.create({
+            data: addActionOwnershipToInput(
+              {
+                ruleId: newsletterRule.id,
+                type: ActionType.DIGEST,
+              },
+              emailAccountId,
+            ),
+          });
+        }
+      } else {
+        await prisma.schedule.deleteMany({
+          where: { emailAccountId },
         });
       }
-    } else {
-      await prisma.schedule.deleteMany({
-        where: { emailAccountId },
-      });
-    }
 
-    return { success: true };
-  });
+      return { success: true };
+    },
+  );

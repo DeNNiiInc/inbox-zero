@@ -23,8 +23,11 @@ Write a friendly follow-up that:
 
 Don't mention that you're an AI.
 Don't reply with a Subject. Only reply with the body of the email.
+Write the follow-up in the same language as the latest message in the thread.
 
-Examples of good follow-up phrases: "Just checking in on this", "Wanted to follow up on my previous email", "Circling back on this"
+Write the follow-up in the same language as the email thread.
+
+Examples of good follow-up phrases (in English): "Just checking in on this", "Wanted to follow up on my previous email", "Circling back on this"
 
 Return your response in JSON format.
 `;
@@ -80,37 +83,35 @@ export async function aiDraftFollowUp({
   emailAccount: EmailAccountWithAI;
   writingStyle: string | null;
 }) {
-  try {
-    logger.info("Drafting follow-up email", {
-      messageCount: messages.length,
-    });
+  logger.info("Drafting follow-up email", {
+    messageCount: messages.length,
+  });
 
-    const prompt = getUserPrompt({
-      messages,
-      emailAccount,
-      writingStyle,
-    });
+  const prompt = getUserPrompt({
+    messages,
+    emailAccount,
+    writingStyle,
+  });
 
-    const modelOptions = getModel(emailAccount.user);
+  const modelOptions = getModel(emailAccount.user, "draft");
 
-    const generateObject = createGenerateObject({
-      emailAccount,
-      label: "Draft follow-up",
-      modelOptions,
-    });
+  const generateObject = createGenerateObject({
+    emailAccount,
+    label: "Draft follow-up",
+    modelOptions,
+    promptHardening: {
+      trust: "untrusted",
+      level: "full",
+      outputConstraint: "plain-text",
+    },
+  });
 
-    const result = await generateObject({
-      ...modelOptions,
-      system: systemPrompt,
-      prompt,
-      schema: draftSchema,
-    });
+  const result = await generateObject({
+    ...modelOptions,
+    system: systemPrompt,
+    prompt,
+    schema: draftSchema,
+  });
 
-    return result.object.reply;
-  } catch (error) {
-    logger.error("Failed to draft follow-up email", { error });
-    return {
-      error: "Failed to draft follow-up email",
-    };
-  }
+  return result.object.reply;
 }

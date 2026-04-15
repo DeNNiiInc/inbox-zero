@@ -1,17 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { processHistoryItem } from "./process-history-item";
 import { HistoryEventType } from "./types";
-import { NewsletterStatus } from "@/generated/prisma/enums";
+import {
+  DraftReplyConfidence,
+  NewsletterStatus,
+} from "@/generated/prisma/enums";
 import type { gmail_v1 } from "@googleapis/gmail";
-import { isAssistantEmail } from "@/utils/assistant/is-assistant-email";
 import { markMessageAsProcessing } from "@/utils/redis/message-processing";
 import { GmailLabel } from "@/utils/gmail/label";
-import { processAssistantEmail } from "@/utils/assistant/process-assistant-email";
-import { getEmailAccount } from "@/__tests__/helpers";
+import { getEmailAccount, createTestLogger } from "@/__tests__/helpers";
 import { createEmailProvider } from "@/utils/email/provider";
-import { createScopedLogger } from "@/utils/logger";
 
-const logger = createScopedLogger("test");
+const logger = createTestLogger();
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/server", () => ({
@@ -19,7 +19,10 @@ vi.mock("next/server", () => ({
 }));
 vi.mock("@/utils/prisma");
 vi.mock("@/utils/redis/message-processing", () => ({
+  acquireOutboundMessageLock: vi.fn().mockResolvedValue("lock-token-1"),
+  clearOutboundMessageLock: vi.fn().mockResolvedValue(true),
   markMessageAsProcessing: vi.fn().mockResolvedValue(true),
+  markOutboundMessageProcessed: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("@/utils/gmail/thread", () => ({
@@ -39,9 +42,6 @@ vi.mock("@/utils/gmail/thread", () => ({
     },
   ]),
 }));
-vi.mock("@/utils/assistant/is-assistant-email", () => ({
-  isAssistantEmail: vi.fn().mockReturnValue(false),
-}));
 vi.mock("@/utils/cold-email/is-cold-email", () => ({
   runColdEmailBlocker: vi
     .fn()
@@ -52,9 +52,6 @@ vi.mock("@/utils/categorize/senders/categorize", () => ({
 }));
 vi.mock("@/utils/ai/choose-rule/run-rules", () => ({
   runRules: vi.fn(),
-}));
-vi.mock("@/utils/assistant/process-assistant-email", () => ({
-  processAssistantEmail: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/utils/digest/index", () => ({
   enqueueDigestItem: vi.fn().mockResolvedValue(undefined),
@@ -153,6 +150,10 @@ describe("processHistoryItem", () => {
     return {
       ...getEmailAccount(),
       autoCategorizeSenders: false,
+      filingEnabled: false,
+      filingPrompt: null,
+      filingConfirmationSendEmail: true,
+      draftReplyConfidence: DraftReplyConfidence.ALL_EMAILS,
     };
   }
 
@@ -165,29 +166,6 @@ describe("processHistoryItem", () => {
     };
 
     await processHistoryItem(createHistoryItem(), options, logger);
-  });
-
-  it("should skip if message is an assistant email", async () => {
-    vi.mocked(isAssistantEmail).mockReturnValueOnce(true);
-
-    const options = {
-      ...defaultOptions,
-      emailAccount: getDefaultEmailAccount(),
-    };
-    await processHistoryItem(createHistoryItem(), options, logger);
-
-    expect(processAssistantEmail).toHaveBeenCalledWith({
-      message: expect.objectContaining({
-        headers: expect.objectContaining({
-          from: "sender@example.com",
-          to: "user@test.com",
-        }),
-      }),
-      userEmail: "user@test.com",
-      emailAccountId: "email-account-id",
-      provider: expect.any(Object),
-      logger,
-    });
   });
 
   it("should skip if message is outbound", async () => {
@@ -227,6 +205,7 @@ describe("processHistoryItem", () => {
     vi.mocked(mockPrisma.default.newsletter.findFirst).mockResolvedValueOnce({
       id: "newsletter-123",
       email: "sender@example.com",
+      name: null,
       status: NewsletterStatus.UNSUBSCRIBED,
       emailAccountId: "email-account-id",
       createdAt: new Date(),

@@ -6,7 +6,7 @@ import type {
 } from "@microsoft/microsoft-graph-types";
 
 // https://stackoverflow.com/a/53276873/2602771
-export type PartialRecord<K extends keyof any, T> = Partial<Record<K, T>>;
+export type PartialRecord<K extends PropertyKey, T> = Partial<Record<K, T>>;
 
 // type guard for filters that removed undefined and null values
 export function isDefined<T>(value: T | undefined | null): value is T {
@@ -21,7 +21,10 @@ export type BatchError = {
   error: {
     code: number;
     message: string;
-    errors: any[][];
+    errors: Array<{
+      message?: string;
+      reason?: string;
+    }>;
     status: string;
   };
 };
@@ -49,71 +52,72 @@ export type ThreadWithPayloadMessages = gmail_v1.Schema$Thread & {
 };
 
 export interface ParsedMessage {
-  id: string;
-  threadId: string;
-  labelIds?: string[];
-  snippet: string;
-  historyId: string;
   attachments?: Attachment[];
-  inline: Inline[];
-  headers: ParsedMessageHeaders;
-  textPlain?: string;
-  textHtml?: string;
-  subject: string;
-  date: string;
-  conversationIndex?: string | null;
-  internalDate?: string | null;
   bodyContentType?: "text" | "html"; // For Outlook: indicates which format the body was originally in
+  conversationIndex?: string | null;
+  date: string;
+  headers: ParsedMessageHeaders;
+  historyId: string;
+  id: string;
+  inline: Inline[];
+  internalDate?: string | null;
+  labelIds?: string[];
+  parentFolderId?: string;
   // For Outlook: store raw recipient data to avoid double conversion
   rawRecipients?: {
     from?: NullableOption<Recipient>;
     toRecipients?: NullableOption<Recipient[]>;
     ccRecipients?: NullableOption<Recipient[]>;
   };
+  snippet: string;
+  subject: string;
+  textHtml?: string;
+  textPlain?: string;
+  threadId: string;
 }
 
 export interface Attachment {
+  attachmentId: string;
   filename: string;
+  headers: Headers;
   mimeType: string;
   size: number;
-  attachmentId: string;
-  headers: Headers;
 }
 
 interface Headers {
-  "content-type": string;
   "content-description": string;
-  "content-transfer-encoding": string;
   "content-id": string;
+  "content-transfer-encoding": string;
+  "content-type": string;
 }
 
 interface Inline {
+  attachmentId: string;
   filename: string;
+  headers: Headers2;
   mimeType: string;
   size: number;
-  attachmentId: string;
-  headers: Headers2;
 }
 
 interface Headers2 {
-  "content-type": string;
   "content-description": string;
-  "content-transfer-encoding": string;
   "content-id": string;
+  "content-transfer-encoding": string;
+  "content-type": string;
 }
 
 export interface ParsedMessageHeaders {
-  subject: string;
-  from: string;
-  to: string;
-  cc?: string;
   bcc?: string;
+  cc?: string;
   date: string; // the date supplied by the email. internally we rely on message.internalDate provided by the gmail api
-  "message-id"?: string;
-  "reply-to"?: string;
+  from: string;
   "in-reply-to"?: string;
-  references?: string;
   "list-unsubscribe"?: string;
+  "message-id"?: string;
+  references?: string;
+  "reply-to"?: string;
+  subject: string;
+  to: string;
 }
 
 // Note: use `getEmailForLLM(message)` to convert a `ParsedMessage` to an `EmailForLLM`
@@ -126,6 +130,7 @@ export type EmailForLLM = {
   subject: string;
   content: string;
   date?: Date;
+  listUnsubscribe?: string;
   attachments?: Array<{
     filename: string;
     mimeType: string;

@@ -1,5 +1,8 @@
 import { SafeError } from "@/utils/error";
-import { ADMIN_ROLES } from "@/utils/organizations/roles";
+import {
+  ADMIN_ROLES,
+  hasOrganizationAdminRole,
+} from "@/utils/organizations/roles";
 import prisma from "@/utils/prisma";
 
 export async function getMemberEmailAccount(
@@ -61,18 +64,65 @@ export async function fetchAndCheckIsAdmin({
   organizationId: string;
   userId: string;
 }) {
+  const errorMessage =
+    "You are not a member of this organization or you do not have admin permissions";
+
+  await getAuthorizedOrganizationAdminMembership({
+    organizationId,
+    userId,
+    missingMembershipMessage: errorMessage,
+    unauthorizedMessage: errorMessage,
+  });
+}
+
+export async function fetchAndCheckIsMember({
+  organizationId,
+  userId,
+}: {
+  organizationId: string;
+  userId: string;
+}): Promise<{ role: string }> {
   const member = await prisma.member.findFirst({
     where: {
       organizationId,
       emailAccount: { userId },
-      role: { in: ADMIN_ROLES },
     },
     select: { role: true },
   });
 
   if (!member) {
-    throw new SafeError(
-      "You are not a member of this organization or you do not have admin permissions",
-    );
+    throw new SafeError("You are not a member of this organization");
   }
+
+  return { role: member.role };
+}
+
+export async function getAuthorizedOrganizationAdminMembership({
+  organizationId,
+  userId,
+  unauthorizedMessage,
+  missingMembershipMessage = "You are not a member of this organization.",
+}: {
+  organizationId: string;
+  userId: string;
+  unauthorizedMessage: string;
+  missingMembershipMessage?: string;
+}) {
+  const member = await prisma.member.findFirst({
+    where: {
+      organizationId,
+      emailAccount: { userId },
+    },
+    select: { role: true, emailAccountId: true, organizationId: true },
+  });
+
+  if (!member) {
+    throw new SafeError(missingMembershipMessage);
+  }
+
+  if (!hasOrganizationAdminRole(member.role)) {
+    throw new SafeError(unauthorizedMessage);
+  }
+
+  return member;
 }

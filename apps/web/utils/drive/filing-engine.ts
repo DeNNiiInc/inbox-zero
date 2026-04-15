@@ -6,24 +6,21 @@ import type { EmailAccountWithAI } from "@/utils/llms/types";
 import type { Logger } from "@/utils/logger";
 import { createDriveProviderWithRefresh } from "@/utils/drive/provider";
 import { createAndSaveFilingFolder } from "@/utils/drive/folder-utils";
-import {
-  extractTextFromDocument,
-  isExtractableMimeType,
-} from "@/utils/drive/document-extraction";
+import { extractTextFromDocument } from "@/utils/drive/document-extraction";
 import { analyzeDocument } from "@/utils/ai/document-filing/analyze-document";
 import {
   sendFiledNotification,
   sendAskNotification,
 } from "@/utils/drive/filing-notifications";
+import { sendFilingMessagingNotifications } from "@/utils/drive/filing-messaging-notifications";
+import { extractEmailAddress } from "@/utils/email";
 
 // ============================================================================
 // Types
 // ============================================================================
 
 export interface FilingResult {
-  success: boolean;
-  skipped?: boolean;
-  skipReason?: string;
+  error?: string;
   filing?: {
     id: string;
     filename: string;
@@ -33,19 +30,23 @@ export interface FilingResult {
     confidence: number | null;
     provider: string;
   };
-  error?: string;
+  filingId?: string; // Available for both filed and skipped items (for feedback)
+  skipped?: boolean;
+  skipReason?: string;
+  success: boolean;
 }
 
 export interface ProcessAttachmentOptions {
+  attachment: Attachment;
   emailAccount: EmailAccountWithAI & {
     filingEnabled: boolean;
     filingPrompt: string | null;
+    filingConfirmationSendEmail: boolean;
     email: string;
   };
-  message: ParsedMessage;
-  attachment: Attachment;
   emailProvider: EmailProvider;
   logger: Logger;
+  message: ParsedMessage;
   sendNotification?: boolean;
 }
 
@@ -104,7 +105,7 @@ export async function processAttachment({
     );
     const buffer = Buffer.from(attachmentData.data, "base64");
 
-    // Step 2: Extract text
+    // Step 2: Extract text (optional - some file types like images can be filed by filename alone)
     log.info("Extracting text from document");
     const extraction = await extractTextFromDocument(
       buffer,
@@ -113,8 +114,9 @@ export async function processAttachment({
     );
 
     if (!extraction) {
-      log.warn("Could not extract text from document");
-      return { success: false, error: "Could not extract text" };
+      log.info(
+        "No text extraction available, will file based on filename and email metadata",
+      );
     }
 
     // Step 3: Get saved filing folders (user-selected, not all folders)
@@ -149,7 +151,9 @@ export async function processAttachment({
       },
       attachment: {
         filename: attachment.filename,
-        content: extraction.text,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+        content: extraction?.text ?? "",
       },
       folders: allFolders,
     });
@@ -163,10 +167,29 @@ export async function processAttachment({
     // Step 5: Handle skip action
     if (analysis.action === "skip") {
       log.info("AI decided to skip this document");
+
+      // Create a DocumentFiling record for skipped items (for audit trail and feedback)
+      const skipFiling = await prisma.documentFiling.create({
+        data: {
+          messageId: message.id,
+          attachmentId: attachment.attachmentId,
+          filename: attachment.filename,
+          folderPath: "",
+          status: "PREVIEW", // PREVIEW = AI decided to skip (not user rejection)
+          reasoning: analysis.reasoning,
+          confidence: analysis.confidence,
+          driveConnectionId: driveConnections[0].id,
+          emailAccountId: emailAccount.id,
+        },
+      });
+
+      log.info("Skip record created", { filingId: skipFiling.id });
+
       return {
         success: false,
         skipped: true,
         skipReason: analysis.reasoning,
+        filingId: skipFiling.id,
       };
     }
 
@@ -238,8 +261,14 @@ export async function processAttachment({
       wasAsked: shouldAsk,
     });
 
+    const shouldSendAskNotification = sendNotification && shouldAsk;
+    const shouldSendFiledNotification =
+      sendNotification &&
+      !shouldAsk &&
+      emailAccount.filingConfirmationSendEmail;
+
     // Step 10: Send notification email as a reply to the source email
-    if (sendNotification) {
+    if (shouldSendAskNotification || shouldSendFiledNotification) {
       const sourceMessage = {
         threadId: message.threadId,
         headerMessageId: message.headers["message-id"] || "",
@@ -247,7 +276,7 @@ export async function processAttachment({
       };
 
       try {
-        if (shouldAsk) {
+        if (shouldSendAskNotification) {
           await sendAskNotification({
             emailProvider,
             userEmail: emailAccount.email,
@@ -268,6 +297,19 @@ export async function processAttachment({
         // Don't fail the filing if notification fails
         log.error("Failed to send notification", { error: notificationError });
       }
+    }
+
+    try {
+      await sendFilingMessagingNotifications({
+        emailAccountId: emailAccount.id,
+        filingId: filing.id,
+        senderEmail: extractEmailAddress(message.headers.from),
+        logger: log,
+      });
+    } catch (messagingError) {
+      log.error("Failed to send messaging notification", {
+        error: messagingError,
+      });
     }
 
     return {
@@ -292,14 +334,13 @@ export async function processAttachment({
 }
 
 /**
- * Get all extractable attachments from a message.
+ * Get all filable attachments from a message.
+ * All attachment types are supported - text-extractable files (PDF, DOCX, TXT)
+ * get full content analysis, while other types (images, spreadsheets, etc.)
+ * are filed based on filename and email metadata.
  */
-export function getExtractableAttachments(
-  message: ParsedMessage,
-): Attachment[] {
-  return (message.attachments || []).filter((a) =>
-    isExtractableMimeType(a.mimeType),
-  );
+export function getFilableAttachments(message: ParsedMessage): Attachment[] {
+  return message.attachments || [];
 }
 
 // ============================================================================
@@ -307,11 +348,11 @@ export function getExtractableAttachments(
 // ============================================================================
 
 interface FolderWithConnection {
+  driveConnectionId: string;
+  driveProvider: string;
   id: string;
   name: string;
   path: string;
-  driveConnectionId: string;
-  driveProvider: string;
 }
 
 interface FolderTarget {
@@ -322,7 +363,11 @@ interface FolderTarget {
 }
 
 function resolveFolderTarget(
-  analysis: { action: string; folderId?: string; folderPath?: string },
+  analysis: {
+    action: string;
+    folderId?: string | null;
+    folderPath?: string | null;
+  },
   folders: FolderWithConnection[],
   connections: DriveConnection[],
   logger: Logger,

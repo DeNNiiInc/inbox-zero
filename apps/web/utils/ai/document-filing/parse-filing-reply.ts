@@ -17,15 +17,15 @@ Always write a helpful, concise reply.`;
 
 const schema = z.object({
   action: z.enum(["approve", "move", "undo", "none"]),
-  folderPath: z.string().optional(),
+  folderPath: z.string().nullable(),
   reply: z.string(),
 });
 
 export type ParseFilingReplyResult = z.infer<typeof schema>;
 
 interface FilingContext {
-  filename: string;
   currentFolder: string;
+  filename: string;
 }
 
 type Message = { role: "user" | "assistant"; content: string };
@@ -40,7 +40,7 @@ export async function aiParseFilingReply({
   emailAccount: EmailAccountWithAI;
 }): Promise<ParseFilingReplyResult> {
   if (!messages.length) {
-    return { action: "none", reply: "" };
+    return { action: "none", reply: "", folderPath: null };
   }
 
   const formattedMessages = messages
@@ -66,6 +66,7 @@ Determine the action and write a reply.`;
     emailAccount,
     label: "Parse filing reply",
     modelOptions,
+    promptHardening: { trust: "trusted" },
   });
 
   const result = await generateObject({

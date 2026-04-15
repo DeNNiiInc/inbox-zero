@@ -1,24 +1,28 @@
 import prisma from "@/utils/prisma";
 import type { EmailProvider } from "@/utils/email/types";
 import type { Logger } from "@/utils/logger";
-import { getFilebotEmail } from "@/utils/filebot/is-filebot-email";
+import {
+  getFilebotFrom,
+  getFilebotReplyTo,
+} from "@/utils/filebot/is-filebot-email";
+import { escapeHtml } from "@/utils/string";
 
 // ============================================================================
 // Types
 // ============================================================================
 
 interface SourceMessageInfo {
-  threadId: string;
   headerMessageId: string;
   references?: string;
+  threadId: string;
 }
 
 interface FilingNotificationParams {
   emailProvider: EmailProvider;
-  userEmail: string;
   filingId: string;
-  sourceMessage: SourceMessageInfo;
   logger: Logger;
+  sourceMessage: SourceMessageInfo;
+  userEmail: string;
 }
 
 // ============================================================================
@@ -51,7 +55,8 @@ export async function sendFiledNotification({
     return;
   }
 
-  const replyToAddress = getFilebotEmail({ userEmail });
+  const replyToAddress = getFilebotReplyTo({ userEmail });
+  const fromAddress = getFilebotFrom({ userEmail });
 
   const subject = `✓ Filed ${filing.filename}`;
   const messageHtml = buildFiledEmailHtml({
@@ -64,6 +69,7 @@ export async function sendFiledNotification({
     const result = await emailProvider.sendEmailWithHtml({
       replyToEmail: sourceMessage,
       to: userEmail,
+      from: fromAddress,
       replyTo: replyToAddress,
       subject,
       messageHtml,
@@ -107,7 +113,8 @@ export async function sendAskNotification({
     return;
   }
 
-  const replyToAddress = getFilebotEmail({ userEmail });
+  const replyToAddress = getFilebotReplyTo({ userEmail });
+  const fromAddress = getFilebotFrom({ userEmail });
 
   const subject = `📄 Where should I file ${filing.filename}?`;
   const messageHtml = buildAskEmailHtml({
@@ -119,6 +126,7 @@ export async function sendAskNotification({
     const result = await emailProvider.sendEmailWithHtml({
       replyToEmail: sourceMessage,
       to: userEmail,
+      from: fromAddress,
       replyTo: replyToAddress,
       subject,
       messageHtml,
@@ -163,7 +171,8 @@ export async function sendCorrectionConfirmation({
     return;
   }
 
-  const replyToAddress = getFilebotEmail({ userEmail });
+  const replyToAddress = getFilebotReplyTo({ userEmail });
+  const fromAddress = getFilebotFrom({ userEmail });
 
   const subject = `Re: ✓ Filed ${filing.filename}`;
   const messageHtml = buildCorrectionConfirmationHtml({
@@ -175,6 +184,7 @@ export async function sendCorrectionConfirmation({
     await emailProvider.sendEmailWithHtml({
       replyToEmail: sourceMessage,
       to: userEmail,
+      from: fromAddress,
       replyTo: replyToAddress,
       subject,
       messageHtml,
@@ -273,13 +283,4 @@ function buildCorrectionConfirmationHtml({
       </div>
     </div>
   `;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
 }

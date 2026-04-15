@@ -4,11 +4,14 @@ import { ZodError, type ZodIssue } from "zod";
 import {
   withError,
   withAuth,
+  withAdmin,
   withEmailAccount,
+  withEmailProvider,
   type RequestWithAuth,
   type NextHandler,
 } from "./middleware";
 import { EMAIL_ACCOUNT_HEADER } from "@/utils/config";
+import prisma from "@/utils/__mocks__/prisma";
 
 // --- Mocks ---
 
@@ -36,6 +39,19 @@ vi.mock("@/utils/auth", () => ({
 }));
 
 vi.mock("@/utils/redis/account-validation");
+vi.mock("@/utils/prisma");
+vi.mock("@/utils/admin", () => ({
+  isAdmin: vi.fn(),
+}));
+vi.mock("@/utils/email/provider", () => ({
+  createEmailProvider: vi.fn(),
+}));
+vi.mock("@/utils/email/rate-limit", () => ({
+  recordRateLimitFromApiError: vi.fn(),
+}));
+vi.mock("@/utils/email/rate-limit-mode-error", () => ({
+  isProviderRateLimitModeError: vi.fn(),
+}));
 
 // Mock specific functions from @/utils/error, keep original SafeError
 vi.mock("@/utils/error", async (importActual) => {
@@ -51,8 +67,12 @@ vi.mock("@/utils/error.server");
 
 // Import from the local path as before
 import { auth } from "@/utils/auth";
+import { isAdmin } from "@/utils/admin";
 import { getEmailAccount } from "@/utils/redis/account-validation";
 import { captureException, checkCommonErrors, SafeError } from "@/utils/error";
+import { createEmailProvider } from "@/utils/email/provider";
+import { isProviderRateLimitModeError } from "@/utils/email/rate-limit-mode-error";
+import { recordRateLimitFromApiError } from "@/utils/email/rate-limit";
 
 // This should now correctly reference mockAuthFn
 const mockAuth = vi.mocked(auth);
@@ -60,6 +80,15 @@ const mockAuth = vi.mocked(auth);
 const mockGetEmailAccount = vi.mocked(getEmailAccount);
 const mockCheckCommonErrors = vi.mocked(checkCommonErrors);
 const mockCaptureException = vi.mocked(captureException);
+const mockIsAdmin = vi.mocked(isAdmin);
+const mockCreateEmailProvider = vi.mocked(createEmailProvider);
+const mockPrismaEmailAccountFindUnique = vi.mocked(
+  prisma.emailAccount.findUnique,
+);
+const mockIsProviderRateLimitModeError = vi.mocked(
+  isProviderRateLimitModeError,
+);
+const mockRecordRateLimitFromApiError = vi.mocked(recordRateLimitFromApiError);
 
 // Helper to create a mock NextRequest
 const createMockRequest = (
@@ -134,6 +163,36 @@ describe("Middleware", () => {
       });
     });
 
+    it("should respect SafeError status codes", async () => {
+      const safeError = new SafeError("Slow down", 429);
+      const handler = vi.fn().mockRejectedValue(safeError);
+      const wrappedHandler = withError(handler);
+
+      const response = await wrappedHandler(mockReq, mockContext);
+      const responseBody = await response.json();
+
+      expect(response.status).toBe(429);
+      expect(responseBody).toEqual({
+        error: "Slow down",
+        isKnownError: true,
+      });
+    });
+
+    it("should ignore non-error SafeError status codes", async () => {
+      const safeError = new SafeError("User-friendly message", 200);
+      const handler = vi.fn().mockRejectedValue(safeError);
+      const wrappedHandler = withError(handler);
+
+      const response = await wrappedHandler(mockReq, mockContext);
+      const responseBody = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(responseBody).toEqual({
+        error: "User-friendly message",
+        isKnownError: true,
+      });
+    });
+
     it("should handle common errors using checkCommonErrors", async () => {
       const commonError = { message: "API Error", code: 409, type: "Conflict" };
       mockCheckCommonErrors.mockReturnValue(commonError);
@@ -145,6 +204,37 @@ describe("Middleware", () => {
 
       expect(checkCommonErrors).toHaveBeenCalled();
       expect(response.status).toBe(commonError.code);
+      expect(responseBody).toEqual({
+        error: commonError.message,
+        isKnownError: true,
+      });
+    });
+
+    it("should still return 429 for rate-limit API errors", async () => {
+      const rateLimitError = new Error("Rate limit exceeded");
+      const commonError = {
+        message: "Gmail error: retry later",
+        code: 429,
+        type: "Gmail Rate Limit Exceeded",
+      };
+      mockCheckCommonErrors.mockReturnValue(commonError);
+      mockRecordRateLimitFromApiError.mockResolvedValueOnce("google");
+      (mockReq as any).auth = { emailAccountId: "acc-456" };
+
+      const handler = vi.fn().mockRejectedValue(rateLimitError);
+      const wrappedHandler = withError("labels", handler);
+
+      const response = await wrappedHandler(mockReq, mockContext);
+      const responseBody = await response.json();
+
+      expect(mockRecordRateLimitFromApiError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apiErrorType: commonError.type,
+          error: rateLimitError,
+          emailAccountId: "acc-456",
+        }),
+      );
+      expect(response.status).toBe(429);
       expect(responseBody).toEqual({
         error: commonError.message,
         isKnownError: true,
@@ -201,6 +291,98 @@ describe("Middleware", () => {
       const responseBody = await response.json();
 
       expect(auth).toHaveBeenCalledTimes(1);
+      expect(handler).not.toHaveBeenCalled();
+      expect(response.status).toBe(401);
+      expect(responseBody).toEqual({
+        error: "Unauthorized",
+        isKnownError: true,
+      });
+    });
+
+    it("should return 500 if auth throws", async () => {
+      const authError = new Error("Session lookup failed");
+      mockAuth.mockRejectedValue(authError);
+      const handler: NextHandler<RequestWithAuth> = vi.fn();
+      const wrappedHandler = withAuth(handler);
+
+      const response = await wrappedHandler(mockReq, mockContext);
+      const responseBody = await response.json();
+
+      expect(auth).toHaveBeenCalledTimes(1);
+      expect(handler).not.toHaveBeenCalled();
+      expect(mockCaptureException).toHaveBeenCalledWith(authError, {
+        extra: { url: mockReq.url },
+      });
+      expect(response.status).toBe(500);
+      expect(responseBody).toEqual({
+        error: "An unexpected error occurred",
+      });
+    });
+  });
+
+  describe("withAdmin", () => {
+    const mockUserId = "user-123";
+
+    it("should call the handler for admin users", async () => {
+      mockAuth.mockResolvedValue({ user: { id: mockUserId } } as any);
+      prisma.user.findUnique.mockResolvedValue({
+        email: "admin@example.com",
+      } as any);
+      mockIsAdmin.mockReturnValue(true);
+
+      const handler = vi.fn(async (_req: RequestWithAuth, _ctx: any) =>
+        NextResponse.json({ ok: true }),
+      );
+      const wrappedHandler = withAdmin("admin/test", handler);
+
+      await wrappedHandler(mockReq, mockContext);
+
+      expect(auth).toHaveBeenCalledTimes(1);
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id: mockUserId },
+        select: { email: true },
+      });
+      expect(mockIsAdmin).toHaveBeenCalledWith({ email: "admin@example.com" });
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          auth: { userId: mockUserId },
+        }),
+        mockContext,
+      );
+    });
+
+    it("should return 403 if user is not admin", async () => {
+      mockAuth.mockResolvedValue({ user: { id: mockUserId } } as any);
+      prisma.user.findUnique.mockResolvedValue({
+        email: "user@example.com",
+      } as any);
+      mockIsAdmin.mockReturnValue(false);
+
+      const handler: NextHandler<RequestWithAuth> = vi.fn();
+      const wrappedHandler = withAdmin("admin/test", handler);
+
+      const response = await wrappedHandler(mockReq, mockContext);
+      const responseBody = await response.json();
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(response.status).toBe(403);
+      expect(responseBody).toEqual({
+        error: "Unauthorized",
+        isKnownError: true,
+      });
+    });
+
+    it("should return 401 if session does not exist", async () => {
+      mockAuth.mockResolvedValue(null as any);
+
+      const handler: NextHandler<RequestWithAuth> = vi.fn();
+      const wrappedHandler = withAdmin("admin/test", handler);
+
+      const response = await wrappedHandler(mockReq, mockContext);
+      const responseBody = await response.json();
+
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      expect(mockIsAdmin).not.toHaveBeenCalled();
       expect(handler).not.toHaveBeenCalled();
       expect(response.status).toBe(401);
       expect(responseBody).toEqual({
@@ -311,6 +493,117 @@ describe("Middleware", () => {
       expect(response.status).toBe(403);
       expect(responseBody).toEqual({
         error: "Invalid account ID",
+        isKnownError: true,
+      });
+    });
+  });
+
+  // --- withEmailProvider Tests ---
+  describe("withEmailProvider", () => {
+    const mockUserId = "user-123";
+    const mockAccountId = "acc-456";
+    const mockEmail = "test@example.com";
+
+    beforeEach(() => {
+      mockAuth.mockResolvedValue({ user: { id: mockUserId } } as any);
+    });
+
+    it("should return 429 for Gmail rate-limit mode errors from provider initialization", async () => {
+      mockReq = createMockRequest("GET", "http://localhost/api/labels", {
+        [EMAIL_ACCOUNT_HEADER]: mockAccountId,
+      });
+      mockGetEmailAccount.mockResolvedValue(mockEmail);
+      mockPrismaEmailAccountFindUnique.mockResolvedValue({
+        id: mockAccountId,
+        account: { provider: "google" },
+      } as any);
+
+      const rateLimitError = new Error("Rate-limit mode active");
+      mockCreateEmailProvider.mockRejectedValue(rateLimitError);
+      mockIsProviderRateLimitModeError.mockImplementation(
+        (error) => error === rateLimitError,
+      );
+
+      const commonError = {
+        type: "Gmail Rate Limit Exceeded",
+        message: "Gmail error: retry later",
+        code: 429,
+      } as const;
+      mockCheckCommonErrors.mockReturnValue(commonError);
+
+      const handler = vi.fn(async () => NextResponse.json({ ok: true }));
+      const wrappedHandler = withEmailProvider("labels", handler);
+
+      const response = await wrappedHandler(mockReq, mockContext);
+      const responseBody = await response.json();
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(checkCommonErrors).toHaveBeenCalledWith(
+        rateLimitError,
+        mockReq.url,
+        expect.anything(),
+      );
+      expect(mockRecordRateLimitFromApiError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apiErrorType: commonError.type,
+          error: rateLimitError,
+          emailAccountId: mockAccountId,
+          source: "labels",
+        }),
+      );
+      expect(response.status).toBe(429);
+      expect(responseBody).toEqual({
+        error: commonError.message,
+        isKnownError: true,
+      });
+    });
+
+    it("should return 429 for Outlook rate-limit mode errors from provider initialization", async () => {
+      mockReq = createMockRequest("GET", "http://localhost/api/labels", {
+        [EMAIL_ACCOUNT_HEADER]: mockAccountId,
+      });
+      mockGetEmailAccount.mockResolvedValue(mockEmail);
+      mockPrismaEmailAccountFindUnique.mockResolvedValue({
+        id: mockAccountId,
+        account: { provider: "microsoft" },
+      } as any);
+
+      const rateLimitError = new Error("Rate-limit mode active");
+      mockCreateEmailProvider.mockRejectedValue(rateLimitError);
+      mockIsProviderRateLimitModeError.mockImplementation(
+        (error) => error === rateLimitError,
+      );
+
+      const commonError = {
+        type: "Outlook Rate Limit",
+        message: "Microsoft is temporarily limiting requests.",
+        code: 429,
+      } as const;
+      mockCheckCommonErrors.mockReturnValue(commonError);
+
+      const handler = vi.fn(async () => NextResponse.json({ ok: true }));
+      const wrappedHandler = withEmailProvider("labels", handler);
+
+      const response = await wrappedHandler(mockReq, mockContext);
+      const responseBody = await response.json();
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(checkCommonErrors).toHaveBeenCalledWith(
+        rateLimitError,
+        mockReq.url,
+        expect.anything(),
+      );
+      expect(mockRecordRateLimitFromApiError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apiErrorType: commonError.type,
+          error: rateLimitError,
+          emailAccountId: mockAccountId,
+          source: "labels",
+        }),
+      );
+      expect(response.status).toBe(429);
+      expect(responseBody).toEqual({
+        error: commonError.message,
         isKnownError: true,
       });
     });

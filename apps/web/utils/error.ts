@@ -4,6 +4,11 @@ import {
 } from "@sentry/nextjs";
 import { APICallError, RetryError } from "ai";
 import type { FlattenedValidationErrors } from "next-safe-action";
+import {
+  getProviderRateLimitApiErrorType,
+  getProviderRateLimitMessageLabel,
+  isProviderRateLimitModeError,
+} from "@/utils/email/rate-limit-mode-error";
 import { createScopedLogger, type Logger } from "@/utils/logger";
 
 export type ErrorMessage = { error: string; data?: any };
@@ -15,6 +20,9 @@ export type ApiErrorType = {
   message?: string;
   code: number;
 };
+
+const RATE_LIMIT_MESSAGE_TEMPLATE =
+  "{provider} is temporarily limiting requests. Please try again shortly.";
 
 export function isError(value: any): value is ErrorMessage | ZodError {
   return value?.error;
@@ -44,11 +52,48 @@ export type CaptureExceptionContext = {
   sampleRate?: number;
 };
 
+export type LlmRepairMetadata = {
+  attempted: true;
+  successful: boolean;
+  label: string;
+  provider: string;
+  model: string;
+  inputLength: number;
+  inputFingerprint: string;
+  startsWithQuote: boolean;
+  startsWithBrace: boolean;
+  startsWithBracket: boolean;
+  looksCodeFenced: boolean;
+  candidateKindsTried: string[];
+  successfulCandidateKind?: string;
+};
+
+const LLM_REPAIR_METADATA_KEY = "__llmRepairMetadata";
+
+export function attachLlmRepairMetadata(
+  error: unknown,
+  metadata: LlmRepairMetadata | undefined,
+) {
+  if (!metadata || typeof error !== "object" || error === null) return;
+
+  const target = error as Record<string, unknown>;
+
+  // Diagnostic metadata must never turn the original model error into a
+  // webhook-processing failure for frozen or otherwise immutable errors.
+  if (!Object.isExtensible(target)) return;
+
+  try {
+    target[LLM_REPAIR_METADATA_KEY] = metadata;
+  } catch {
+    return;
+  }
+}
+
 export function captureException(
   error: unknown,
   context: CaptureExceptionContext = {},
 ) {
-  if (isKnownApiError(error)) {
+  if (isKnownApiError(error) || isHandledUserKeyError(error)) {
     const logger = createScopedLogger("captureException");
     logger.warn("Known API error", { error, context });
     return;
@@ -65,8 +110,10 @@ export function captureException(
 
   if (userEmail) setUser({ email: userEmail });
 
+  const llmRepair = getLlmRepairMetadata(error);
   const sentryExtra = {
     ...extra,
+    ...(llmRepair ? { llmRepair } : {}),
     ...(emailAccountId && { emailAccountId }),
     ...(userId && { userId }),
   };
@@ -74,6 +121,15 @@ export function captureException(
   sentryCaptureException(error, {
     extra: Object.keys(sentryExtra).length > 0 ? sentryExtra : undefined,
   });
+}
+
+function getLlmRepairMetadata(error: unknown): LlmRepairMetadata | undefined {
+  if (typeof error !== "object" || error === null) return;
+
+  const metadata = (error as Record<string, unknown>)[LLM_REPAIR_METADATA_KEY];
+  if (!metadata || typeof metadata !== "object") return;
+
+  return metadata as LlmRepairMetadata;
 }
 
 export type ActionError<E extends object = Record<string, unknown>> = {
@@ -109,15 +165,15 @@ export function isGmailQuotaExceededError(error: unknown): boolean {
   return (error as any)?.errors?.[0]?.reason === "quotaExceeded";
 }
 
-export function isIncorrectOpenAIAPIKeyError(error: APICallError): boolean {
-  return error.message.includes("Incorrect API key provided");
-}
-
-export function isInvalidOpenAIModelError(error: APICallError): boolean {
-  return error.message.includes(
-    "does not exist or you do not have access to it",
+function isIncorrectAPIKeyError(error: APICallError): boolean {
+  return (
+    error.message.includes("Incorrect API key provided") ||
+    error.statusCode === 401
   );
 }
+
+/** @deprecated Use isIncorrectAPIKeyError */
+export const isIncorrectOpenAIAPIKeyError = isIncorrectAPIKeyError;
 
 export function isInvalidAIModelError(error: APICallError): boolean {
   // OpenAI: "The model `xyz` does not exist or you do not have access to it"
@@ -130,12 +186,30 @@ export function isInvalidAIModelError(error: APICallError): boolean {
   if (error.statusCode === 404 && error.message.includes("not_found_error")) {
     return true;
   }
+  // Bedrock: error message is just the model ID (e.g., "model: anthropic.claude-...")
+  if (/^model:\s*\S+$/.test(error.message.trim())) {
+    return true;
+  }
+  // OpenRouter: model deprecated or unavailable
+  if (error.message.includes("testing period")) {
+    return true;
+  }
+  // Generic model-not-found patterns
+  if (
+    error.message.includes("model is not available") ||
+    error.message.includes("model not found")
+  ) {
+    return true;
+  }
   return false;
 }
 
-export function isOpenAIAPIKeyDeactivatedError(error: APICallError): boolean {
+function isAPIKeyDeactivatedError(error: APICallError): boolean {
   return error.message.includes("this API key has been deactivated");
 }
+
+/** @deprecated Use isAPIKeyDeactivatedError */
+export const isOpenAIAPIKeyDeactivatedError = isAPIKeyDeactivatedError;
 
 export function isAnthropicInsufficientBalanceError(
   error: APICallError,
@@ -143,6 +217,21 @@ export function isAnthropicInsufficientBalanceError(
   return error.message.includes(
     "Your credit balance is too low to access the Anthropic API",
   );
+}
+
+export function isInsufficientCreditsError(error: APICallError): boolean {
+  return error.statusCode === 402;
+}
+
+const HANDLED_USER_KEY_ERROR = "__handledUserKeyError";
+
+export function markAsHandledUserKeyError(error: unknown): void {
+  if (typeof error !== "object" || error === null) return;
+  (error as Record<string, unknown>)[HANDLED_USER_KEY_ERROR] = true;
+}
+
+export function isHandledUserKeyError(error: unknown): boolean {
+  return (error as Record<string, unknown>)?.[HANDLED_USER_KEY_ERROR] === true;
 }
 
 // Handling AI quota/retry errors. This can be related to the user's own API quota or the system's quota.
@@ -159,15 +248,6 @@ export function isAiQuotaExceededError(error: RetryError): boolean {
   return quotaErrorMessages.some((substr) => message.includes(substr));
 }
 
-export function isAWSThrottlingError(error: unknown): error is Error {
-  return (
-    error instanceof Error &&
-    error.name === "ThrottlingException" &&
-    (error.message?.includes("Too many requests") ||
-      error.message?.includes("please wait before trying again"))
-  );
-}
-
 export function isOutlookThrottlingError(error: unknown): boolean {
   const err = error as Record<string, unknown>;
   const code = err?.code as string | undefined;
@@ -177,31 +257,61 @@ export function isOutlookThrottlingError(error: unknown): boolean {
     statusCode === 429 ||
     code === "ApplicationThrottled" ||
     code === "TooManyRequests" ||
-    (typeof message === "string" && /MailboxConcurrency/i.test(message))
+    (typeof message === "string" &&
+      (/MailboxConcurrency/i.test(message) ||
+        message.includes("Request limit")))
   );
 }
 
-export function isAICallError(error: unknown): error is APICallError {
-  return APICallError.isInstance(error);
+export function isOutlookAccessDeniedError(error: unknown): boolean {
+  const err = error as Record<string, unknown>;
+  const code = err?.code as string | undefined;
+  const message =
+    typeof err?.message === "string" ? err.message : String(err ?? "");
+  return (
+    code === "ErrorAccessDenied" ||
+    code === "AccessDenied" ||
+    message.includes("Access is denied. Check credentials and try again")
+  );
 }
 
-export function isServiceUnavailableError(error: unknown): error is Error {
-  return error instanceof Error && error.name === "ServiceUnavailableException";
+export function isOutlookItemNotFoundError(error: unknown): boolean {
+  const err = error as Record<string, unknown>;
+  const code = err?.code as string | undefined;
+  const message =
+    typeof err?.message === "string" ? err.message : String(err ?? "");
+  return (
+    code === "ErrorItemNotFound" ||
+    code === "itemNotFound" ||
+    message.includes("not found in the store") ||
+    message.includes("ResourceNotFound") ||
+    message.includes("isn't an ID of an item")
+  );
+}
+
+export function isKnownOutlookError(error: unknown): boolean {
+  return (
+    isOutlookThrottlingError(error) ||
+    isOutlookAccessDeniedError(error) ||
+    isOutlookItemNotFoundError(error)
+  );
 }
 
 // we don't want to capture these errors in Sentry
 export function isKnownApiError(error: unknown): boolean {
   return (
+    isProviderRateLimitModeError(error) ||
     isGmailInsufficientPermissionsError(error) ||
     isGmailRateLimitExceededError(error) ||
     isGmailQuotaExceededError(error) ||
-    isOutlookThrottlingError(error) ||
+    isKnownOutlookError(error) ||
     (APICallError.isInstance(error) &&
-      (isIncorrectOpenAIAPIKeyError(error) ||
+      (isIncorrectAPIKeyError(error) ||
         isInvalidAIModelError(error) ||
-        isOpenAIAPIKeyDeactivatedError(error) ||
+        isAPIKeyDeactivatedError(error) ||
         isAnthropicInsufficientBalanceError(error))) ||
-    (RetryError.isInstance(error) && isAiQuotaExceededError(error))
+    (RetryError.isInstance(error) && isAiQuotaExceededError(error)) ||
+    (error instanceof Error && isKnownAIErrorMessage(error.message))
   );
 }
 
@@ -210,6 +320,21 @@ export function checkCommonErrors(
   url: string,
   logger: Logger,
 ): ApiErrorType | null {
+  if (isProviderRateLimitModeError(error)) {
+    const apiErrorType = getProviderRateLimitApiErrorType(error.provider);
+    const providerLabel = getProviderRateLimitMessageLabel(error.provider);
+    logger.warn("Provider rate-limit mode active for url", {
+      url,
+      provider: error.provider,
+      retryAt: error.retryAt,
+    });
+    return {
+      type: apiErrorType,
+      message: RATE_LIMIT_MESSAGE_TEMPLATE.replace("{provider}", providerLabel),
+      code: 429,
+    };
+  }
+
   if (isGmailInsufficientPermissionsError(error)) {
     logger.warn("Gmail insufficient permissions error for url", { url });
     return {
@@ -225,7 +350,7 @@ export function checkCommonErrors(
     const errorMessage =
       (error as any)?.errors?.[0]?.message ?? "Unknown error";
     return {
-      type: "Gmail Rate Limit Exceeded",
+      type: getProviderRateLimitApiErrorType("google"),
       message: `Gmail error: ${errorMessage}`,
       code: 429,
     };
@@ -243,10 +368,29 @@ export function checkCommonErrors(
   if (isOutlookThrottlingError(error)) {
     logger.warn("Outlook throttling error for url", { url });
     return {
-      type: "Outlook Rate Limit",
+      type: getProviderRateLimitApiErrorType("microsoft"),
       message:
         "Microsoft is temporarily limiting requests. Please try again shortly.",
       code: 429,
+    };
+  }
+
+  if (isOutlookAccessDeniedError(error)) {
+    logger.warn("Outlook access denied error for url", { url });
+    return {
+      type: "Outlook Access Denied",
+      message:
+        "Access to the mailbox was denied. The account may need to be reconnected.",
+      code: 403,
+    };
+  }
+
+  if (isOutlookItemNotFoundError(error)) {
+    logger.warn("Outlook item not found for url", { url });
+    return {
+      type: "Outlook Item Not Found",
+      message: "The requested email was not found. It may have been deleted.",
+      code: 404,
     };
   }
 
@@ -278,6 +422,19 @@ export function getErrorMessage(error: unknown): string | undefined {
   return getStringProp(nested, "message");
 }
 
+export function getUserFacingErrorMessage(
+  error: unknown,
+  fallback = "An unexpected error occurred. Please try again.",
+): string {
+  const message = getErrorMessage(error);
+  if (!message) return fallback;
+
+  const parsed = parseJsonRecord(message);
+  if (!parsed) return message;
+
+  return getErrorMessage(parsed) || getStringProp(parsed, "error") || message;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
@@ -290,6 +447,14 @@ function getStringProp(
 ): string | undefined {
   const value = obj[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function parseJsonRecord(message: string): Record<string, unknown> | null {
+  try {
+    return asRecord(JSON.parse(message));
+  } catch {
+    return null;
+  }
 }
 
 // --- Safe Action Error Handling ---
@@ -372,4 +537,19 @@ function getValidationMessages(
   const all = [...formErrors, ...Object.values(fieldErrors).flat()];
 
   return all.length > 0 ? all.join(". ") : null;
+}
+
+// Message-based fallback for AI errors that may lose their APICallError type
+// (e.g., when wrapped by middleware like PostHog AI)
+function isKnownAIErrorMessage(message: string): boolean {
+  const patterns = [
+    "Incorrect API key provided",
+    "does not exist or you do not have access to it",
+    "this API key has been deactivated",
+    "credit balance is too low",
+    "testing period",
+    "model is not available",
+    "model not found",
+  ];
+  return patterns.some((p) => message.includes(p));
 }

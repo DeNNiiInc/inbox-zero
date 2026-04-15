@@ -5,18 +5,22 @@ import type { Logger } from "@/utils/logger";
 import type { EmailAccountWithAI } from "@/utils/llms/types";
 import type { DriveConnection } from "@/generated/prisma/client";
 import { extractEmailAddress } from "@/utils/email";
-import { emailToContent } from "@/utils/mail";
 import { createDriveProviderWithRefresh } from "@/utils/drive/provider";
 import { createAndSaveFilingFolder } from "@/utils/drive/folder-utils";
 import { aiParseFilingReply } from "@/utils/ai/document-filing/parse-filing-reply";
+import {
+  getFilebotFrom,
+  getFilebotReplyTo,
+} from "@/utils/filebot/is-filebot-email";
+import { emailToContentForAI } from "@/utils/ai/content-sanitizer";
 
 interface ProcessFilingReplyArgs {
-  emailAccountId: string;
-  userEmail: string;
-  message: ParsedMessage;
-  emailProvider: EmailProvider;
   emailAccount: EmailAccountWithAI;
+  emailAccountId: string;
+  emailProvider: EmailProvider;
   logger: Logger;
+  message: ParsedMessage;
+  userEmail: string;
 }
 
 /**
@@ -37,29 +41,23 @@ export async function processFilingReply({
     messageId: message.id,
   });
 
-  if (!verifyUserSentEmail({ message, userEmail })) {
+  if (!verifyUserSentEmail({ message, userEmail, provider: emailProvider })) {
     logger.error("Unauthorized filing reply attempt", {
       from: message.headers.from,
     });
     return;
   }
 
-  const inReplyTo = message.headers["in-reply-to"];
-
-  if (!inReplyTo) {
-    logger.error("No In-Reply-To header found");
-    return;
-  }
-
-  const filing = await prisma.documentFiling.findUnique({
-    where: { notificationMessageId: inReplyTo },
-    include: {
-      driveConnection: true,
-    },
+  const filing = await findFilingFromThread({
+    message,
+    emailProvider,
+    emailAccountId,
   });
 
   if (!filing) {
-    logger.error("Filing not found for In-Reply-To message", { inReplyTo });
+    logger.error("Filing not found for thread", {
+      threadId: message.threadId,
+    });
     return;
   }
 
@@ -70,7 +68,9 @@ export async function processFilingReply({
 
   logger = logger.with({ filingId: filing.id });
 
-  const replyContent = emailToContent(message, { extractReply: true }).trim();
+  const replyContent = emailToContentForAI(message, {
+    extractReply: true,
+  }).trim();
 
   if (!replyContent) {
     return;
@@ -90,7 +90,12 @@ export async function processFilingReply({
   });
 
   if (parseResult.reply) {
-    await emailProvider.replyToEmail(message, parseResult.reply);
+    const filebotReplyTo = getFilebotReplyTo({ userEmail });
+    const filebotFrom = getFilebotFrom({ userEmail });
+    await emailProvider.replyToEmail(message, parseResult.reply, {
+      replyTo: filebotReplyTo,
+      from: filebotFrom,
+    });
   }
 
   switch (parseResult.action) {
@@ -127,12 +132,20 @@ export async function processFilingReply({
 function verifyUserSentEmail({
   message,
   userEmail,
+  provider,
 }: {
   message: ParsedMessage;
   userEmail: string;
+  provider: EmailProvider;
 }): boolean {
-  const fromEmail = extractEmailAddress(message.headers.from)?.toLowerCase();
-  return fromEmail === userEmail.toLowerCase();
+  const fromMatch =
+    extractEmailAddress(message.headers.from)?.toLowerCase() ===
+    userEmail.toLowerCase();
+
+  // Check the SENT label to prevent spoofed From: header attacks
+  const hasSentLabel = provider.isSentMessage(message);
+
+  return fromMatch && hasSentLabel;
 }
 
 async function handleApprove(filingId: string): Promise<void> {
@@ -205,7 +218,7 @@ async function handleMove({
   filingWasCorrected: boolean;
   filingOriginalPath: string | null;
   driveConnection: DriveConnection;
-  folderPath: string | undefined;
+  folderPath: string | null;
   emailAccountId: string;
   logger: Logger;
 }): Promise<void> {
@@ -255,4 +268,33 @@ async function handleMove({
       data: { status: "ERROR" },
     });
   }
+}
+
+/**
+ * Find the filing by walking the thread to find a message whose
+ * notificationMessageId matches one of the thread's message IDs.
+ */
+async function findFilingFromThread({
+  message,
+  emailProvider,
+  emailAccountId,
+}: {
+  message: ParsedMessage;
+  emailProvider: EmailProvider;
+  emailAccountId: string;
+}) {
+  const threadMessages = await emailProvider.getThreadMessages(
+    message.threadId,
+  );
+  if (!threadMessages?.length) return null;
+
+  const messageIds = threadMessages.map((m) => m.id);
+
+  return prisma.documentFiling.findFirst({
+    where: {
+      emailAccountId,
+      notificationMessageId: { in: messageIds },
+    },
+    include: { driveConnection: true },
+  });
 }

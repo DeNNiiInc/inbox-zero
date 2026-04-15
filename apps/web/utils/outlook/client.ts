@@ -1,9 +1,14 @@
 import { Client } from "@microsoft/microsoft-graph-client";
 import type { User } from "@microsoft/microsoft-graph-types";
-import { saveTokens } from "@/utils/auth";
+import { saveTokens } from "@/utils/auth/save-tokens";
 import { cleanupInvalidTokens } from "@/utils/auth/cleanup-invalid-tokens";
 import { env } from "@/env";
 import type { Logger } from "@/utils/logger";
+import {
+  getMicrosoftGraphClientOptions,
+  getMicrosoftOauthAuthorizeUrl,
+  requestMicrosoftToken,
+} from "@/utils/microsoft/oauth";
 import { SCOPES } from "@/utils/outlook/scopes";
 import { SafeError } from "@/utils/error";
 
@@ -15,23 +20,24 @@ export class OutlookClient {
   private readonly client: Client;
   private readonly accessToken: string;
   private readonly logger: Logger;
-  private readonly mailboxAddress: string;
   private folderIdCache: Record<string, string> | null = null;
   private categoryMapCache: Map<string, string> | null = null;
 
-  constructor(accessToken: string, logger: Logger, mailboxAddress = "me") {
+  constructor(accessToken: string, logger: Logger) {
     this.accessToken = accessToken;
     this.logger = logger;
-    this.mailboxAddress = mailboxAddress;
+    const graphClientOptions = getMicrosoftGraphClientOptions(accessToken);
     this.client = Client.init({
       authProvider: (done) => {
         done(null, this.accessToken);
       },
       defaultVersion: "v1.0",
+      ...graphClientOptions,
       // Use immutable IDs to ensure message IDs remain stable
       // https://learn.microsoft.com/en-us/graph/outlook-immutable-id
       fetchOptions: {
         headers: {
+          ...(graphClientOptions.fetchOptions?.headers ?? {}),
           Prefer: 'IdType="ImmutableId"',
         },
       },
@@ -44,25 +50,6 @@ export class OutlookClient {
 
   getAccessToken(): string {
     return this.accessToken;
-  }
-
-  getMailboxAddress(): string {
-    return this.mailboxAddress;
-  }
-
-  /**
-   * Helper to create a Graph API request with the correct mailbox root.
-   * If mailboxAddress is NOT "me", it uses "/users/{mailboxAddress}".
-   */
-  api(path: string) {
-    const root =
-      this.mailboxAddress === "me"
-        ? "/me"
-        : `/users/${this.mailboxAddress}`;
-    
-    // Ensure path starts with / if not already
-    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-    return this.client.api(`${root}${normalizedPath}`);
   }
 
   getFolderIdCache(): Record<string, string> | null {
@@ -111,13 +98,9 @@ export class OutlookClient {
 }
 
 // Helper to create OutlookClient instance
-export const createOutlookClient = (
-  accessToken: string,
-  logger: Logger,
-  mailboxAddress?: string,
-) => {
+export const createOutlookClient = (accessToken: string, logger: Logger) => {
   if (!accessToken) throw new SafeError("No access token provided");
-  return new OutlookClient(accessToken, logger, mailboxAddress);
+  return new OutlookClient(accessToken, logger);
 };
 
 // Similar to Gmail's getGmailClientWithRefresh
@@ -126,14 +109,12 @@ export const getOutlookClientWithRefresh = async ({
   refreshToken,
   expiresAt,
   emailAccountId,
-  mailboxAddress,
   logger,
 }: {
   accessToken?: string | null;
   refreshToken: string | null;
   expiresAt: number | null;
   emailAccountId: string;
-  mailboxAddress?: string;
   logger: Logger;
 }): Promise<OutlookClient> => {
   if (!refreshToken) {
@@ -148,7 +129,7 @@ export const getOutlookClientWithRefresh = async ({
     expiryDate &&
     expiryDate > Date.now() + TOKEN_REFRESH_BUFFER_MS
   ) {
-    return createOutlookClient(accessToken, logger, mailboxAddress);
+    return createOutlookClient(accessToken, logger);
   }
 
   // Refresh token
@@ -157,21 +138,12 @@ export const getOutlookClientWithRefresh = async ({
       throw new Error("Microsoft login not enabled - missing credentials");
     }
 
-    const response = await fetch(
-      `https://login.microsoftonline.com/${env.MICROSOFT_TENANT_ID}/oauth2/v2.0/token`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-          client_id: env.MICROSOFT_CLIENT_ID,
-          client_secret: env.MICROSOFT_CLIENT_SECRET,
-          refresh_token: refreshToken,
-          grant_type: "refresh_token",
-        }),
-      },
-    );
+    const response = await requestMicrosoftToken({
+      client_id: env.MICROSOFT_CLIENT_ID,
+      client_secret: env.MICROSOFT_CLIENT_SECRET,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    });
 
     const tokens = await response.json();
 
@@ -278,18 +250,16 @@ export function getLinkingOAuth2Url() {
     throw new Error("Microsoft login not enabled - missing client ID");
   }
 
-  const baseUrl = `https://login.microsoftonline.com/${env.MICROSOFT_TENANT_ID}/oauth2/v2.0/authorize`;
   const params = new URLSearchParams({
     client_id: env.MICROSOFT_CLIENT_ID,
     response_type: "code",
     redirect_uri: `${env.NEXT_PUBLIC_BASE_URL}/api/outlook/linking/callback`,
     scope: SCOPES.join(" "),
     // we can't use select_account because we need a new refresh token if the users is stale
-    // prompt: "consent",
-    prompt: "select_account",
+    prompt: "consent",
   });
 
-  return `${baseUrl}?${params.toString()}`;
+  return `${getMicrosoftOauthAuthorizeUrl()}?${params.toString()}`;
 }
 
 // Helper types for common Microsoft Graph operations

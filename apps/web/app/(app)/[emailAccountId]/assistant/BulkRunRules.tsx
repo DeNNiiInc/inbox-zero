@@ -2,7 +2,7 @@
 
 import { useReducer, useRef, useState } from "react";
 import Link from "next/link";
-import { HistoryIcon, PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
+import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SectionDescription } from "@/components/Typography";
 import type { ThreadsResponse } from "@/app/api/threads/route";
@@ -16,7 +16,8 @@ import {
 } from "@/utils/queue/ai-queue";
 import { sleep } from "@/utils/sleep";
 import { toastError } from "@/components/Toast";
-import { PremiumAlertWithData, usePremium } from "@/components/PremiumAlert";
+import { PremiumAlertWithData } from "@/components/PremiumAlert";
+import { usePremium } from "@/hooks/usePremium";
 import { SetDateDropdown } from "@/app/(app)/[emailAccountId]/assistant/SetDateDropdown";
 import { useThreads } from "@/hooks/useThreads";
 import { useBeforeUnload } from "@/hooks/useBeforeUnload";
@@ -56,7 +57,7 @@ export function BulkRunRules() {
 
   const isBusinessPlusTier = hasTierAccess({
     tier: tier || null,
-    minimumTier: "BUSINESS_PLUS_MONTHLY",
+    minimumTier: "PROFESSIONAL_MONTHLY",
   });
 
   const [startDate, setStartDate] = useState<Date | undefined>();

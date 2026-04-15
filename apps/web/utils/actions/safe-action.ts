@@ -6,6 +6,7 @@ import { z } from "zod";
 import { after } from "next/server";
 import { auth } from "@/utils/auth";
 import { createScopedLogger } from "@/utils/logger";
+import { flushLoggerSafely } from "@/utils/logger-flush";
 import prisma from "@/utils/prisma";
 import { isAdmin } from "@/utils/admin";
 import { captureException, SafeError } from "@/utils/error";
@@ -19,20 +20,35 @@ const baseClient = createSafeActionClient({
   },
   defaultValidationErrorsShape: "flattened",
   handleServerError(error, { metadata, ctx, bindArgsClientInputs }) {
-    const context = ctx as {
-      userId?: string;
-      userEmail?: string;
-      emailAccountId?: string;
-    };
+    const context = ctx as
+      | {
+          logger: ReturnType<typeof createScopedLogger>;
+          requestId: string;
+          userId?: string;
+          userEmail?: string;
+          emailAccountId?: string;
+        }
+      | undefined;
 
-    const logger = createScopedLogger("safe-action");
+    const logger =
+      context?.logger ??
+      createScopedLogger(metadata?.name || "safe-action").with({
+        requestId: context?.requestId,
+        userId: context?.userId,
+        userEmail: context?.userEmail,
+        emailAccountId: context?.emailAccountId,
+      });
     logger.error("Server action error:", {
       metadata,
-      userId: context?.userId,
-      userEmail: context?.userEmail,
-      emailAccountId: context?.emailAccountId,
       bindArgsClientInputs,
       error,
+    });
+    after(async () => {
+      await flushLoggerSafely(logger, {
+        action: metadata?.name,
+        flushReason: "server-action-error",
+        requestId: context?.requestId,
+      });
     });
 
     if (env.NODE_ENV !== "production") {
@@ -59,17 +75,13 @@ const baseClient = createSafeActionClient({
   const logger = createScopedLogger(metadata.name).with({ requestId });
 
   after(async () => {
-    await logger.flush().catch((error) => {
-      captureException(error, {
-        extra: {
-          action: metadata.name,
-          requestId,
-        },
-      });
+    await flushLoggerSafely(logger, {
+      action: metadata.name,
+      requestId,
     });
   });
 
-  const result = await next({ ctx: { logger } });
+  const result = await next({ ctx: { logger, requestId } });
 
   if (result.validationErrors) {
     logger.warn("Action validation error", {
@@ -125,6 +137,7 @@ export const actionClient = baseClient
     return withServerActionInstrumentation(metadata.name, async () => {
       return next({
         ctx: {
+          ...ctx,
           logger,
           userId,
           userEmail,
@@ -158,7 +171,7 @@ export const actionClientUser = baseClient.use(
 
     return withServerActionInstrumentation(metadata?.name, async () => {
       return next({
-        ctx: { userId, userEmail, logger },
+        ctx: { ...ctx, userId, userEmail, logger },
       });
     });
   },
@@ -174,7 +187,7 @@ export const adminActionClient = baseClient.use(
     const logger = ctx.logger.with({ admin: true });
 
     return withServerActionInstrumentation(metadata?.name, async () => {
-      return next({ ctx: { logger } });
+      return next({ ctx: { ...ctx, logger } });
     });
   },
 );

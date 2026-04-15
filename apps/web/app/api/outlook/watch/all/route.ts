@@ -7,7 +7,6 @@ import { hasAiAccess, getPremiumUserFilter } from "@/utils/premium";
 import { createManagedOutlookSubscription } from "@/utils/outlook/subscription-manager";
 import type { Logger } from "@/utils/logger";
 
-export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 export const GET = withError("outlook/watch/all", async (request) => {
@@ -74,7 +73,7 @@ async function watchAllEmails(logger: Logger) {
 
       const userHasAiAccess = hasAiAccess(
         emailAccount.user.premium?.tier || null,
-        emailAccount.user.aiApiKey,
+        !!emailAccount.user.aiApiKey,
       );
 
       if (!userHasAiAccess) {

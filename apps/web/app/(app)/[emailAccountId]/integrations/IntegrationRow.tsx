@@ -16,6 +16,7 @@ import {
 import { ChevronDown, ChevronRight, MoreVertical } from "lucide-react";
 import clsx from "clsx";
 import { toastError, toastSuccess } from "@/components/Toast";
+import { DomainIcon } from "@/components/charts/DomainIcon";
 import {
   disconnectMcpConnectionAction,
   toggleMcpConnectionAction,
@@ -178,7 +179,12 @@ export function IntegrationRow({
   return (
     <>
       <TableRow>
-        <TableCell>{integration.displayName}</TableCell>
+        <TableCell>
+          <div className="flex items-center gap-3">
+            <DomainIcon domain={integration.url} size={32} />
+            <span>{integration.displayName}</span>
+          </div>
+        </TableCell>
         <TableCell>
           {integration.comingSoon ? (
             <RequestAccessDialog integrationName={integration.displayName} />
@@ -211,7 +217,7 @@ export function IntegrationRow({
             </TypographyP>
           )}
         </TableCell>
-        <TableCell>
+        <TableCell className="hidden sm:table-cell">
           {integration.comingSoon ? (
             <span className="text-gray-400 text-sm">Coming Soon</span>
           ) : connected && tools.length > 0 ? (
@@ -255,6 +261,14 @@ export function IntegrationRow({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                {tools.length > 0 && (
+                  <DropdownMenuItem
+                    onClick={() => setExpandedTools(!expandedTools)}
+                    className="sm:hidden"
+                  >
+                    {expandedTools ? "Hide tools" : "Manage tools"}
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   onClick={handleDisconnect}
                   disabled={disconnecting}
@@ -280,10 +294,10 @@ export function IntegrationRow({
 }
 
 interface ToolsListProps {
+  onToggleTool: (toolId: string, isEnabled: boolean) => void;
   tools: NonNullable<
     GetIntegrationsResponse["integrations"][number]["connection"]
   >["tools"];
-  onToggleTool: (toolId: string, isEnabled: boolean) => void;
   toolsWarning?: string;
 }
 

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { usePostHog } from "posthog-js/react";
 import {
   ArchiveIcon,
+  ArchiveRestoreIcon,
   Loader2Icon,
   MailXIcon,
   ThumbsDownIcon,
@@ -17,10 +18,12 @@ import {
   useBulkArchive,
   useBulkDelete,
 } from "@/app/(app)/[emailAccountId]/bulk-unsubscribe/hooks";
-import { PremiumTooltip, usePremium } from "@/components/PremiumAlert";
+import { PremiumTooltip } from "@/components/PremiumAlert";
+import { usePremium } from "@/hooks/usePremium";
 import { usePremiumModal } from "@/app/(app)/premium/PremiumModal";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import { cn } from "@/utils";
+import { getHttpUnsubscribeLink } from "@/utils/parse/unsubscribe";
 import {
   Dialog,
   DialogContent,
@@ -34,7 +37,7 @@ import { DomainIcon } from "@/components/charts/DomainIcon";
 import { extractDomainFromEmail } from "@/utils/email";
 import type { NewsletterStatsResponse } from "@/app/api/user/stats/newsletters/route";
 import { NewsletterStatus } from "@/generated/prisma/enums";
-import type { NewsletterFilterType } from "@/app/(app)/[emailAccountId]/bulk-unsubscribe/hooks";
+import type { NewsletterFilterType } from "@/app/(app)/[emailAccountId]/bulk-unsubscribe/types";
 
 type Newsletter = NewsletterStatsResponse["newsletters"][number];
 
@@ -45,6 +48,7 @@ function ActionButton({
   onClick,
   loading,
   danger,
+  showLabelOnMobile,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
@@ -52,12 +56,14 @@ function ActionButton({
   onClick: () => void;
   loading?: boolean;
   danger?: boolean;
+  showLabelOnMobile?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={loading}
+      title={label}
       className={cn(
         "flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap",
         "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
@@ -70,7 +76,9 @@ function ActionButton({
       ) : (
         <Icon className="size-4" />
       )}
-      {loading && loadingLabel ? loadingLabel : label}
+      <span className={showLabelOnMobile ? undefined : "hidden sm:inline"}>
+        {loading && loadingLabel ? loadingLabel : label}
+      </span>
     </button>
   );
 }
@@ -95,7 +103,7 @@ export function BulkActions({
 }) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
-  const [skipInboxDialogOpen, setSkipInboxDialogOpen] = useState(false);
+  const [autoArchiveDialogOpen, setAutoArchiveDialogOpen] = useState(false);
 
   const posthog = usePostHog();
   const { hasUnsubscribeAccess, mutate: refetchPremium } = usePremium();
@@ -129,9 +137,9 @@ export function BulkActions({
   });
 
   const { onBulkArchive, isBulkArchiving } = useBulkArchive({
-    mutate,
     posthog,
     emailAccountId,
+    mutate,
   });
 
   const { onBulkDelete, isBulkDeleting } = useBulkDelete({
@@ -163,6 +171,25 @@ export function BulkActions({
     );
   }, [selectedNewsletters]);
 
+  const allSelectedCanUnsubscribe = selectedNewsletters.every(
+    (n) => n.status !== NewsletterStatus.UNSUBSCRIBED,
+  );
+
+  const hasUnsubscribeLinks = selectedNewsletters.some((n) =>
+    getHttpUnsubscribeLink({ unsubscribeLink: n.unsubscribeLink }),
+  );
+
+  const hasBlockableLinks = selectedNewsletters.some(
+    (n) => !getHttpUnsubscribeLink({ unsubscribeLink: n.unsubscribeLink }),
+  );
+
+  const unsubscribeLabel =
+    hasUnsubscribeLinks && hasBlockableLinks
+      ? "Unsubscribe/Block"
+      : hasBlockableLinks
+        ? "Block"
+        : "Unsubscribe";
+
   return (
     <>
       <AnimatePresence>
@@ -178,9 +205,9 @@ export function BulkActions({
               showTooltip={!hasUnsubscribeAccess}
               openModal={openModal}
             >
-              <div className="mt-4 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 flex items-center justify-between gap-3">
+              <div className="mt-4 bg-gray-50 border border-gray-200 rounded-lg px-2 sm:px-3 py-2 flex items-center justify-between gap-1 sm:gap-3">
                 {/* Left side: Close button and selection count */}
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1 sm:gap-3 shrink-0">
                   <button
                     type="button"
                     onClick={onClearSelection}
@@ -188,22 +215,26 @@ export function BulkActions({
                   >
                     <XIcon className="size-4" />
                   </button>
-                  <span className="text-sm text-gray-600">
-                    {selectedCount} of {totalCount} selected
+                  <span className="text-sm text-gray-600 whitespace-nowrap">
+                    {selectedCount} of {totalCount}
+                    <span className="hidden sm:inline"> selected</span>
                   </span>
                 </div>
 
                 {/* Right side: Action Buttons */}
-                <div className="flex items-center gap-1 flex-nowrap">
+                <div className="flex items-center gap-0 sm:gap-1 flex-nowrap">
+                  {allSelectedCanUnsubscribe && (
+                    <ActionButton
+                      icon={MailXIcon}
+                      label={unsubscribeLabel}
+                      showLabelOnMobile
+                      onClick={() => onBulkUnsubscribe(getSelectedValues())}
+                    />
+                  )}
                   <ActionButton
-                    icon={MailXIcon}
-                    label="Unsubscribe"
-                    onClick={() => onBulkUnsubscribe(getSelectedValues())}
-                  />
-                  <ActionButton
-                    icon={ArchiveIcon}
-                    label="Skip Inbox"
-                    onClick={() => setSkipInboxDialogOpen(true)}
+                    icon={ArchiveRestoreIcon}
+                    label="Auto Archive"
+                    onClick={() => setAutoArchiveDialogOpen(true)}
                   />
                   <ActionButton
                     icon={
@@ -259,7 +290,11 @@ export function BulkActions({
                       key={newsletter.name}
                       className="flex items-center gap-3 px-3 py-2"
                     >
-                      <DomainIcon domain={domain} size={32} />
+                      <DomainIcon
+                        domain={domain}
+                        size={32}
+                        variant="circular"
+                      />
                       <div className="flex flex-col min-w-0">
                         <span className="font-medium text-sm truncate">
                           {newsletter.fromName || newsletter.name}
@@ -319,7 +354,11 @@ export function BulkActions({
                       key={newsletter.name}
                       className="flex items-center gap-3 px-3 py-2"
                     >
-                      <DomainIcon domain={domain} size={32} />
+                      <DomainIcon
+                        domain={domain}
+                        size={32}
+                        variant="circular"
+                      />
                       <div className="flex flex-col min-w-0">
                         <span className="font-medium text-sm truncate">
                           {newsletter.fromName || newsletter.name}
@@ -356,11 +395,14 @@ export function BulkActions({
         </DialogContent>
       </Dialog>
 
-      {/* Skip Inbox Confirmation Dialog */}
-      <Dialog open={skipInboxDialogOpen} onOpenChange={setSkipInboxDialogOpen}>
+      {/* Auto Archive Confirmation Dialog */}
+      <Dialog
+        open={autoArchiveDialogOpen}
+        onOpenChange={setAutoArchiveDialogOpen}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Skip inbox for these senders?</DialogTitle>
+            <DialogTitle>Auto archive these senders?</DialogTitle>
             <DialogDescription>
               Automatically archive all current and future emails from these
               senders. They will no longer appear in your inbox.
@@ -369,17 +411,17 @@ export function BulkActions({
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setSkipInboxDialogOpen(false)}
+              onClick={() => setAutoArchiveDialogOpen(false)}
             >
               Cancel
             </Button>
             <Button
               onClick={() => {
                 onBulkAutoArchive(getSelectedValues());
-                setSkipInboxDialogOpen(false);
+                setAutoArchiveDialogOpen(false);
               }}
             >
-              Skip Inbox
+              Auto Archive
             </Button>
           </DialogFooter>
         </DialogContent>

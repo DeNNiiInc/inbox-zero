@@ -3,55 +3,13 @@
 import Link from "next/link";
 import { CrownIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { usePremium } from "@/hooks/usePremium";
 import { hasAiAccess, hasUnsubscribeAccess, isPremium } from "@/utils/premium";
 import { Tooltip } from "@/components/Tooltip";
 import { usePremiumModal } from "@/app/(app)/premium/PremiumModal";
 import type { PremiumTier } from "@/generated/prisma/enums";
-import { businessTierName } from "@/app/(app)/premium/config";
-import { useUser } from "@/hooks/useUser";
+import { starterTierName } from "@/app/(app)/premium/config";
 import { ActionCard } from "@/components/ui/card";
-import { env } from "@/env";
-
-export function usePremium() {
-  const swrResponse = useUser();
-  const { data } = swrResponse;
-
-  const premium = data?.premium;
-  const aiApiKey = data?.aiApiKey;
-
-  if (env.NEXT_PUBLIC_BYPASS_PREMIUM_CHECKS) {
-    return {
-      ...swrResponse,
-      premium,
-      isPremium: true,
-      hasUnsubscribeAccess: true,
-      hasAiAccess: true,
-      isProPlanWithoutApiKey: false,
-      tier: "BUSINESS_PLUS_ANNUALLY" as const,
-    };
-  }
-
-  const isUserPremium = !!(
-    premium &&
-    isPremium(premium.lemonSqueezyRenewsAt, premium.stripeSubscriptionStatus)
-  );
-
-  const isProPlanWithoutApiKey =
-    (premium?.tier === "PRO_MONTHLY" || premium?.tier === "PRO_ANNUALLY") &&
-    !aiApiKey;
-
-  return {
-    ...swrResponse,
-    premium,
-    isPremium: isUserPremium,
-    hasUnsubscribeAccess:
-      isUserPremium ||
-      hasUnsubscribeAccess(premium?.tier || null, premium?.unsubscribeCredits),
-    hasAiAccess: hasAiAccess(premium?.tier || null, aiApiKey),
-    isProPlanWithoutApiKey,
-    tier: premium?.tier,
-  };
-}
 
 export function PremiumAiAssistantAlert({
   showSetApiKey,
@@ -90,8 +48,8 @@ export function PremiumAiAssistantAlert({
       {isBasicPlan ? (
         <ActionCard
           icon={<CrownIcon className="h-5 w-5" />}
-          title={`${businessTierName} Plan Required`}
-          description={`Switch to the ${businessTierName} plan to use this feature.`}
+          title={`${starterTierName} Plan Required`}
+          description={`Switch to the ${starterTierName} plan to use this feature.`}
           action={
             <Button variant="primaryBlack" onClick={openModal}>
               Switch Plan
@@ -113,7 +71,7 @@ export function PremiumAiAssistantAlert({
         <ActionCard
           icon={<CrownIcon className="h-5 w-5" />}
           title="Premium Feature"
-          description={`This is a premium feature. Upgrade to the ${businessTierName} plan.`}
+          description={`This is a premium feature. Upgrade to the ${starterTierName} plan.`}
           action={
             <Button variant="primaryBlack" onClick={openModal}>
               Upgrade
@@ -159,7 +117,7 @@ export function PremiumAlertWithData({
 }
 
 export function PremiumTooltip(props: {
-  children: React.ReactElement<any>;
+  children: React.ReactElement;
   showTooltip: boolean;
   openModal: () => void;
 }) {

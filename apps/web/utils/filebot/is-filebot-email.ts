@@ -1,9 +1,15 @@
 import { env } from "@/env";
-import { extractEmailAddress } from "@/utils/email";
+import {
+  extractEmailAddress,
+  extractEmailAddresses,
+  extractNameFromEmail,
+  formatEmailWithName,
+} from "@/utils/email";
 
 // In prod: hello+ai@example.com
 // In dev: hello+ai-test@example.com
 const FILEBOT_SUFFIX = `ai${env.NODE_ENV === "development" ? "-test" : ""}`;
+const FILEBOT_DISPLAY_NAME = "Inbox Zero Assistant";
 
 /**
  * Check if any recipient in the email is a filebot reply address.
@@ -47,6 +53,60 @@ export function getFilebotEmail({ userEmail }: { userEmail: string }): string {
     throw new Error("Invalid email format");
   }
   return `${localPart}+${FILEBOT_SUFFIX}@${domain}`;
+}
+
+export function getFilebotReplyTo({
+  userEmail,
+}: {
+  userEmail: string;
+}): string {
+  return formatEmailWithName(
+    FILEBOT_DISPLAY_NAME,
+    getFilebotEmail({ userEmail }),
+  );
+}
+
+export function getFilebotFrom({ userEmail }: { userEmail: string }): string {
+  return formatEmailWithName(FILEBOT_DISPLAY_NAME, userEmail);
+}
+
+/**
+ * Check whether an outbound message is a filebot notification email.
+ * These are internal assistant-generated messages and should not be treated as
+ * user-authored outbound replies for conversation status tracking.
+ */
+export function isFilebotNotificationMessage({
+  userEmail,
+  from,
+  to,
+  replyTo,
+}: {
+  userEmail: string;
+  from: string;
+  to: string;
+  replyTo?: string;
+}): boolean {
+  if (
+    replyTo &&
+    isFilebotEmail({
+      userEmail,
+      emailToCheck: replyTo,
+    })
+  ) {
+    return true;
+  }
+
+  const normalizedUserEmail = userEmail.toLowerCase();
+  const fromEmail = extractEmailAddress(from)?.toLowerCase();
+  if (fromEmail !== normalizedUserEmail) return false;
+
+  const toEmails = extractEmailAddresses(to).map((email) =>
+    email.toLowerCase(),
+  );
+  if (!toEmails.includes(normalizedUserEmail)) return false;
+
+  const fromName = extractNameFromEmail(from).trim().toLowerCase();
+  return fromName === FILEBOT_DISPLAY_NAME.toLowerCase();
 }
 
 /**

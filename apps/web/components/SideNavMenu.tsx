@@ -1,18 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import type { ComponentProps } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 
 type NavItem = {
   name: string;
   href: string;
-  icon: LucideIcon | ((props: any) => React.ReactNode);
+  icon: LucideIcon | ((props: ComponentProps<"svg">) => React.ReactNode);
   target?: "_blank";
   count?: number;
   hideInMail?: boolean;
@@ -28,6 +30,8 @@ export function SideNavMenu({
   items: NavItem[];
   activeHref: string;
 }) {
+  const { closeMobileSidebar } = useSidebar();
+
   return (
     <SidebarMenu>
       {items.map((item) => (
@@ -39,7 +43,10 @@ export function SideNavMenu({
             tooltip={item.name}
             sidebarName="left-sidebar"
           >
-            <Link href={item.href}>
+            <Link
+              href={item.href}
+              onClick={() => closeMobileSidebar("left-sidebar")}
+            >
               <item.icon />
               <span>{item.name}</span>
               {item.new && (

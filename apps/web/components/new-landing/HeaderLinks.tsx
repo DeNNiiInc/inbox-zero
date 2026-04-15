@@ -22,7 +22,7 @@ import {
 
 const navigation = [
   { name: "Enterprise", href: "/enterprise" },
-  { name: "Pricing", href: "/#pricing" },
+  { name: "Pricing", href: "/pricing" },
 ];
 
 const useCases = [
@@ -68,7 +68,7 @@ const useCases = [
   },
   {
     title: "Customer Support",
-    href: "/support",
+    href: "/customer-support",
     description: "Deliver faster support with AI-powered responses",
     icon: HeadphonesIcon,
     iconColor: "text-new-orange-600",

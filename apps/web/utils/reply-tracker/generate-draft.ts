@@ -1,10 +1,9 @@
 import type { ParsedMessage } from "@/utils/types";
-import { escapeHtml } from "@/utils/string";
-import { internalDateToDate } from "@/utils/date";
+import { internalDateToDate, sortByInternalDate } from "@/utils/date";
 import { getEmailForLLM } from "@/utils/get-email-from-message";
 import { extractEmailAddress, extractEmailAddresses } from "@/utils/email";
-import { aiDraftReply } from "@/utils/ai/reply/draft-reply";
-import { getReply, saveReply } from "@/utils/redis/reply";
+import { aiDraftReplyWithConfidence } from "@/utils/ai/reply/draft-reply";
+import { getReplyWithConfidence, saveReply } from "@/utils/redis/reply";
 import { getWritingStyle } from "@/utils/user/get";
 import type { EmailAccountWithAI } from "@/utils/llms/types";
 import type { Logger } from "@/utils/logger";
@@ -13,6 +12,7 @@ import { aiExtractRelevantKnowledge } from "@/utils/ai/knowledge/extract";
 import { stringifyEmail } from "@/utils/stringify-email";
 import { aiExtractFromEmailHistory } from "@/utils/ai/knowledge/extract-from-email-history";
 import type { EmailProvider } from "@/utils/email/types";
+import { renderEmailTextWithSafeLinks } from "@/utils/email/render-safe-links";
 import { aiCollectReplyContext } from "@/utils/ai/reply/reply-context-collector";
 import { getOrCreateReferralCode } from "@/utils/referral/referral-code";
 import { generateReferralLink } from "@/utils/referral/referral-link";
@@ -23,6 +23,21 @@ import {
   getMeetingContext,
   formatMeetingContextForPrompt,
 } from "@/utils/meeting-briefs/recipient-context";
+import { DraftReplyConfidence } from "@/generated/prisma/enums";
+import { meetsDraftReplyConfidenceRequirement } from "@/utils/ai/reply/draft-confidence";
+import type { DraftAttribution } from "@/utils/ai/reply/draft-attribution";
+import { selectDraftAttachmentsForRule } from "@/utils/attachments/draft-attachments";
+import type { SelectedAttachment } from "@/utils/attachments/source-schema";
+import { getReplyMemoriesForPrompt } from "@/utils/ai/reply/reply-memory";
+import type { DraftContextMetadata } from "@/utils/ai/reply/draft-context-metadata";
+
+export type DraftGenerationResult = {
+  attachments?: SelectedAttachment[];
+  draft: string | null;
+  confidence: DraftReplyConfidence;
+  attribution: DraftAttribution | null;
+  draftContextMetadata?: DraftContextMetadata | null;
+};
 
 /**
  * Fetches thread messages and generates draft content in one step
@@ -33,35 +48,74 @@ export async function fetchMessagesAndGenerateDraft(
   client: EmailProvider,
   testMessage: ParsedMessage | undefined,
   logger: Logger,
+  selectedRuleId?: string,
 ): Promise<string> {
+  const result = await fetchMessagesAndGenerateDraftWithConfidenceThreshold(
+    emailAccount,
+    threadId,
+    client,
+    testMessage,
+    logger,
+    DraftReplyConfidence.ALL_EMAILS,
+    selectedRuleId,
+  );
+
+  if (result.draft == null) {
+    throw new Error("Draft generation did not return content");
+  }
+
+  return result.draft;
+}
+
+export async function fetchMessagesAndGenerateDraftWithConfidenceThreshold(
+  emailAccount: EmailAccountWithAI,
+  threadId: string,
+  client: EmailProvider,
+  testMessage: ParsedMessage | undefined,
+  logger: Logger,
+  minimumConfidence: DraftReplyConfidence,
+  selectedRuleId?: string,
+): Promise<DraftGenerationResult> {
   const { threadMessages, previousConversationMessages } = testMessage
     ? { threadMessages: [testMessage], previousConversationMessages: null }
     : await fetchThreadAndConversationMessages(threadId, client);
 
-  const result = await generateDraftContent(
-    emailAccount,
-    threadMessages,
-    previousConversationMessages,
-    client,
-    logger,
-  );
+  const { draft, confidence, attribution, attachments, draftContextMetadata } =
+    await generateDraftContent(
+      emailAccount,
+      threadMessages,
+      previousConversationMessages,
+      client,
+      logger,
+      minimumConfidence,
+      selectedRuleId,
+    );
 
-  if (typeof result !== "string") {
-    throw new Error("Draft result is not a string");
+  if (draft == null) {
+    return {
+      draft: null,
+      confidence,
+      attribution,
+      draftContextMetadata,
+      ...(selectedRuleId ? { attachments } : {}),
+    };
   }
 
   const emailAccountWithSignatures = await prisma.emailAccount.findUnique({
     where: { id: emailAccount.id },
     select: {
+      allowHiddenAiDraftLinks: true,
       includeReferralSignature: true,
       signature: true,
     },
   });
 
-  // Escape AI-generated content to prevent prompt injection attacks
-  // (e.g., hidden divs with sensitive data that could be leaked)
-  // Signatures and other trusted HTML are added AFTER escaping
-  let finalResult = escapeHtml(result);
+  // Escape untrusted AI output, but preserve sanitized links so drafts can
+  // include clickable URLs without allowing arbitrary HTML rendering.
+  let finalResult = renderEmailTextWithSafeLinks(draft, {
+    allowHiddenLinks:
+      emailAccountWithSignatures?.allowHiddenAiDraftLinks ?? false,
+  });
 
   if (
     !env.NEXT_PUBLIC_DISABLE_REFERRAL_SIGNATURE &&
@@ -79,7 +133,13 @@ export async function fetchMessagesAndGenerateDraft(
     finalResult = `${finalResult}\n\n${emailAccountWithSignatures.signature}`;
   }
 
-  return finalResult;
+  return {
+    draft: finalResult,
+    confidence,
+    attribution,
+    draftContextMetadata,
+    ...(selectedRuleId ? { attachments } : {}),
+  };
 }
 
 /**
@@ -92,7 +152,11 @@ async function fetchThreadAndConversationMessages(
   threadMessages: ParsedMessage[];
   previousConversationMessages: ParsedMessage[] | null;
 }> {
-  const threadMessages = await client.getThreadMessages(threadId);
+  // Normalize provider-specific ordering (Outlook returns newest-first).
+  // Downstream drafting logic expects chronological order (oldest -> newest).
+  const threadMessages = (await client.getThreadMessages(threadId)).sort(
+    sortByInternalDate("asc"),
+  );
   const previousConversationMessages =
     await client.getPreviousConversationMessages(
       threadMessages.map((msg) => msg.id),
@@ -110,18 +174,42 @@ async function generateDraftContent(
   previousConversationMessages: ParsedMessage[] | null,
   emailProvider: EmailProvider,
   logger: Logger,
-) {
+  minimumConfidence: DraftReplyConfidence,
+  selectedRuleId?: string,
+): Promise<DraftGenerationResult> {
   const lastMessage = threadMessages.at(-1);
 
   if (!lastMessage) throw new Error("No message provided");
 
-  // Check Redis cache for reply
-  const reply = await getReply({
+  const cachedReply = await getReplyWithConfidence({
     emailAccountId: emailAccount.id,
     messageId: lastMessage.id,
+    ruleId: selectedRuleId,
   });
 
-  if (reply) return reply;
+  if (cachedReply) {
+    const meetsThreshold = meetsDraftReplyConfidenceRequirement({
+      draftConfidence: cachedReply.confidence,
+      minimumConfidence,
+    });
+
+    if (meetsThreshold) {
+      return {
+        draft: cachedReply.reply,
+        confidence: cachedReply.confidence,
+        attribution: cachedReply.attribution,
+        draftContextMetadata: cachedReply.draftContextMetadata,
+        ...(selectedRuleId ? { attachments: cachedReply.attachments } : {}),
+      };
+    }
+
+    logger.info("Skipping cached draft due to low confidence", {
+      draftConfidence: cachedReply.confidence,
+      minimumConfidence,
+      threadId: lastMessage.threadId,
+      messageId: lastMessage.id,
+    });
+  }
 
   const messages = threadMessages.map((msg, index) => ({
     date: internalDateToDate(msg.internalDate),
@@ -145,18 +233,62 @@ async function generateDraftContent(
     messages[messages.length - 1],
     10_000,
   );
+  const historicalMessagesForLLM = previousConversationMessages?.map((msg) =>
+    getEmailForLLM(msg, {
+      maxLength: 1000,
+      extractReply: true,
+      removeForwarded: false,
+    }),
+  );
+
+  if (historicalMessagesForLLM?.length) {
+    logger.info("Fetching historical messages from sender");
+    logger.trace("Fetching historical messages from sender", {
+      sender: lastMessage.headers.from,
+    });
+  }
+  const attachmentSelectionPromise = selectedRuleId
+    ? selectDraftAttachmentsForRule({
+        emailAccount,
+        ruleId: selectedRuleId,
+        emailContent: lastMessageContent,
+        logger,
+      }).catch((error) => {
+        logger.error("Failed to select draft attachments", {
+          error,
+          ruleId: selectedRuleId,
+        });
+        return {
+          selectedAttachments: [],
+          attachmentContext: null,
+        };
+      })
+    : Promise.resolve({
+        selectedAttachments: [],
+        attachmentContext: null,
+      });
   const [
     knowledgeResult,
+    replyMemorySelection,
     emailHistoryContext,
     calendarAvailability,
     writingStyle,
+    learnedWritingStyle,
     mcpResult,
     upcomingMeetings,
+    emailHistorySummary,
+    attachmentSelection,
   ] = await Promise.all([
     aiExtractRelevantKnowledge({
       knowledgeBase,
       emailContent: lastMessageContent,
       emailAccount,
+      logger,
+    }),
+    getReplyMemoriesForPrompt({
+      emailAccountId: emailAccount.id,
+      senderEmail: extractEmailAddress(lastMessage.headers.from),
+      emailContent: lastMessageContent,
       logger,
     }),
     aiCollectReplyContext({
@@ -166,6 +298,10 @@ async function generateDraftContent(
     }),
     aiGetCalendarAvailability({ emailAccount, messages, logger }),
     getWritingStyle({ emailAccountId: emailAccount.id }),
+    prisma.emailAccount.findUnique({
+      where: { id: emailAccount.id },
+      select: { learnedWritingStyle: true },
+    }),
     mcpAgent({ emailAccount, messages }),
     getMeetingContext({
       emailAccountId: emailAccount.id,
@@ -180,56 +316,162 @@ async function generateDraftContent(
       ),
       logger,
     }),
+    historicalMessagesForLLM?.length
+      ? aiExtractFromEmailHistory({
+          currentThreadMessages: messages,
+          historicalMessages: historicalMessagesForLLM,
+          emailAccount,
+          logger,
+        })
+      : Promise.resolve(null),
+    attachmentSelectionPromise,
   ]);
+  const {
+    content: replyMemoryContent,
+    selectedMemories: selectedReplyMemories,
+  } = replyMemorySelection;
+  const meetingContext = formatMeetingContextForPrompt(
+    upcomingMeetings,
+    emailAccount.timezone,
+  );
+  const precedentThreadCount = emailHistoryContext?.relevantEmails.length ?? 0;
+  const draftContextMetadata: DraftContextMetadata = {
+    replyMemories: {
+      count: selectedReplyMemories.length,
+      ids: selectedReplyMemories.map((m) => m.id),
+      kinds: [...new Set(selectedReplyMemories.map((m) => m.kind))],
+      scopeTypes: [...new Set(selectedReplyMemories.map((m) => m.scopeType))],
+    },
+    knowledgeBase: {
+      availableCount: knowledgeBase.length,
+      injected: !!knowledgeResult?.relevantContent?.trim(),
+    },
+    senderHistory: {
+      summaryInjected: !!emailHistorySummary,
+      summarySourceMessageCount: historicalMessagesForLLM?.length ?? 0,
+      precedentThreadsInjected: precedentThreadCount > 0,
+      precedentThreadCount,
+    },
+    calendar: {
+      injected: !!calendarAvailability,
+      noAvailability: calendarAvailability?.noAvailability ?? false,
+      suggestedTimesCount: calendarAvailability?.suggestedTimes?.length ?? 0,
+    },
+    writingStyle: { custom: !!writingStyle },
+    externalTools: { injected: !!mcpResult?.response },
+    meetings: { injected: !!meetingContext, count: upcomingMeetings.length },
+    attachments: {
+      injected: !!attachmentSelection.attachmentContext,
+      selectedCount: attachmentSelection.selectedAttachments.length,
+    },
+  };
 
-  // 2b. Extract email history context
-  const senderEmail = lastMessage.headers.from;
-
-  logger.info("Fetching historical messages from sender", {
-    sender: senderEmail,
-  });
-
-  // Convert to format needed for aiExtractFromEmailHistory
-  const historicalMessagesForLLM = previousConversationMessages?.map((msg) => {
-    return getEmailForLLM(msg, {
-      maxLength: 1000,
-      extractReply: true,
-      removeForwarded: false,
+  if (selectedReplyMemories.length) {
+    logger.info("Injecting reply memories into draft prompt", {
+      replyMemoryCount: selectedReplyMemories.length,
+      replyMemoryIds: selectedReplyMemories.map((memory) => memory.id),
+      replyMemoryKinds: [
+        ...new Set(selectedReplyMemories.map((memory) => memory.kind)),
+      ],
+      replyMemoryScopeTypes: [
+        ...new Set(selectedReplyMemories.map((memory) => memory.scopeType)),
+      ],
     });
-  });
-
-  const emailHistorySummary = historicalMessagesForLLM?.length
-    ? await aiExtractFromEmailHistory({
-        currentThreadMessages: messages,
-        historicalMessages: historicalMessagesForLLM,
-        emailAccount,
-        logger,
-      })
-    : null;
+  }
 
   // 3. Draft reply
-  const text = await aiDraftReply({
+  const { reply, confidence, attribution } = await aiDraftReplyWithConfidence({
     messages,
     emailAccount,
     knowledgeBaseContent: knowledgeResult?.relevantContent || null,
+    replyMemoryContent,
     emailHistorySummary,
     emailHistoryContext,
     calendarAvailability,
     writingStyle,
+    learnedWritingStyle: learnedWritingStyle?.learnedWritingStyle ?? null,
     mcpContext: mcpResult?.response || null,
-    meetingContext: formatMeetingContextForPrompt(
-      upcomingMeetings,
-      emailAccount.timezone,
-    ),
+    meetingContext,
+    attachmentContext: attachmentSelection.attachmentContext,
   });
 
-  if (typeof text === "string") {
+  if (
+    !meetsDraftReplyConfidenceRequirement({
+      draftConfidence: confidence,
+      minimumConfidence,
+    })
+  ) {
+    logger.info("Skipping draft due to low confidence", {
+      draftConfidence: confidence,
+      minimumConfidence,
+      threadId: lastMessage.threadId,
+      messageId: lastMessage.id,
+    });
+
+    try {
+      await saveReply({
+        emailAccountId: emailAccount.id,
+        messageId: lastMessage.id,
+        reply,
+        confidence,
+        attribution,
+        draftContextMetadata,
+        ...(selectedRuleId
+          ? {
+              attachments: attachmentSelection.selectedAttachments,
+              ruleId: selectedRuleId,
+            }
+          : {}),
+      });
+    } catch (error) {
+      logger.error("Failed to cache low-confidence draft", {
+        error,
+        messageId: lastMessage.id,
+        confidence,
+      });
+    }
+
+    return {
+      draft: null,
+      confidence,
+      attribution,
+      draftContextMetadata,
+      ...(selectedRuleId
+        ? { attachments: attachmentSelection.selectedAttachments }
+        : {}),
+    };
+  }
+
+  try {
     await saveReply({
       emailAccountId: emailAccount.id,
       messageId: lastMessage.id,
-      reply: text,
+      reply,
+      confidence,
+      attribution,
+      draftContextMetadata,
+      ...(selectedRuleId
+        ? {
+            attachments: attachmentSelection.selectedAttachments,
+            ruleId: selectedRuleId,
+          }
+        : {}),
+    });
+  } catch (error) {
+    logger.error("Failed to cache draft", {
+      error,
+      messageId: lastMessage.id,
+      confidence,
     });
   }
 
-  return text;
+  return {
+    draft: reply,
+    confidence,
+    attribution,
+    draftContextMetadata,
+    ...(selectedRuleId
+      ? { attachments: attachmentSelection.selectedAttachments }
+      : {}),
+  };
 }

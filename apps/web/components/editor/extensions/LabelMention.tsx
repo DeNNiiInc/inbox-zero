@@ -2,7 +2,7 @@ import { ReactRenderer } from "@tiptap/react";
 import { Mention } from "@tiptap/extension-mention";
 import { PluginKey } from "@tiptap/pm/state";
 import { MentionList, type MentionListRef } from "./MentionList";
-import type { EmailLabel } from "@/providers/EmailProvider";
+import type { EmailLabel } from "@/providers/email-label-types";
 
 const MAX_SUGGESTIONS = 10;
 
@@ -21,8 +21,8 @@ interface MarkdownNode {
 interface MarkdownItState {
   pos: number;
   posMax: number;
-  src: string;
   push: (type: string, tag: string, nesting: number) => MarkdownItToken;
+  src: string;
 }
 
 interface MarkdownItToken {

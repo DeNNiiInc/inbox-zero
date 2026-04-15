@@ -2,18 +2,17 @@ import type { NextResponse } from "next/server";
 
 export interface CalendarTokens {
   accessToken: string;
-  refreshToken: string;
-  expiresAt: Date | null;
   email: string;
+  expiresAt: Date | null;
+  refreshToken: string;
 }
 
 export interface CalendarOAuthProvider {
-  name: "google" | "microsoft";
-
   /**
    * Exchange OAuth code for tokens and get user email
    */
   exchangeCodeForTokens(code: string): Promise<CalendarTokens>;
+  name: "google" | "microsoft";
 
   /**
    * Sync calendars for this provider
@@ -24,11 +23,11 @@ export interface CalendarOAuthProvider {
     refreshToken: string,
     emailAccountId: string,
     expiresAt: Date | null,
-    mailboxAddress?: string,
   ): Promise<void>;
 }
 
 export interface OAuthCallbackValidation {
+  calendarState: CalendarOAuthState;
   code: string;
   redirectUrl: URL;
   response: NextResponse;
@@ -36,7 +35,6 @@ export interface OAuthCallbackValidation {
 
 export interface CalendarOAuthState {
   emailAccountId: string;
-  type: "calendar";
   nonce: string;
-  mailboxAddress?: string;
+  type: "calendar";
 }

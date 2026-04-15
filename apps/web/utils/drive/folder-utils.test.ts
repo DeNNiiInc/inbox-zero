@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createFolderPath } from "./folder-utils";
 import type { DriveProvider, DriveFolder } from "./types";
-import { createScopedLogger } from "@/utils/logger";
+import { createTestLogger } from "@/__tests__/helpers";
 
 vi.mock("server-only", () => ({}));
 
@@ -16,13 +16,14 @@ function createMockFolder(id: string, name: string): DriveFolder {
 
 function createMockProvider(
   existingFolders: Map<string | undefined, DriveFolder[]> = new Map(),
+  providerName: DriveProvider["name"] = "google",
 ): DriveProvider {
   const createdFolders: DriveFolder[] = [];
   let folderId = 1;
 
   return {
-    name: "google",
-    toJSON: () => ({ name: "google", type: "drive" }),
+    name: providerName,
+    toJSON: () => ({ name: providerName, type: "drive" }),
     getAccessToken: () => "mock-token",
     listFolders: vi.fn(async (parentId?: string) => {
       const existing = existingFolders.get(parentId) || [];
@@ -54,7 +55,7 @@ function createMockProvider(
   };
 }
 
-const logger = createScopedLogger("test");
+const logger = createTestLogger();
 
 describe("createFolderPath", () => {
   beforeEach(() => {
@@ -66,7 +67,9 @@ describe("createFolderPath", () => {
 
     const result = await createFolderPath(provider, "Receipts", logger);
 
-    expect(result.name).toBe("Receipts");
+    expect(result.folder.name).toBe("Receipts");
+    expect(result.allFolders).toHaveLength(1);
+    expect(result.allFolders[0].path).toBe("Receipts");
     expect(provider.createFolder).toHaveBeenCalledWith("Receipts", undefined);
   });
 
@@ -79,7 +82,11 @@ describe("createFolderPath", () => {
       logger,
     );
 
-    expect(result.name).toBe("December");
+    expect(result.folder.name).toBe("December");
+    expect(result.allFolders).toHaveLength(3);
+    expect(result.allFolders[0].path).toBe("Receipts");
+    expect(result.allFolders[1].path).toBe("Receipts/2024");
+    expect(result.allFolders[2].path).toBe("Receipts/2024/December");
     expect(provider.createFolder).toHaveBeenCalledTimes(3);
     expect(provider.createFolder).toHaveBeenNthCalledWith(
       1,
@@ -96,7 +103,11 @@ describe("createFolderPath", () => {
 
     const result = await createFolderPath(provider, "Receipts/2024", logger);
 
-    expect(result.name).toBe("2024");
+    expect(result.folder.name).toBe("2024");
+    expect(result.allFolders).toHaveLength(2);
+    expect(result.allFolders[0].folder.id).toBe("existing-1");
+    expect(result.allFolders[0].path).toBe("Receipts");
+    expect(result.allFolders[1].path).toBe("Receipts/2024");
     expect(provider.createFolder).toHaveBeenCalledTimes(1);
     expect(provider.createFolder).toHaveBeenCalledWith("2024", "existing-1");
   });
@@ -109,7 +120,7 @@ describe("createFolderPath", () => {
 
     const result = await createFolderPath(provider, "receipts/2024", logger);
 
-    expect(result.name).toBe("2024");
+    expect(result.folder.name).toBe("2024");
     expect(provider.createFolder).toHaveBeenCalledTimes(1);
     expect(provider.createFolder).toHaveBeenCalledWith("2024", "existing-1");
   });
@@ -119,7 +130,7 @@ describe("createFolderPath", () => {
 
     const result = await createFolderPath(provider, "/Receipts", logger);
 
-    expect(result.name).toBe("Receipts");
+    expect(result.folder.name).toBe("Receipts");
     expect(provider.createFolder).toHaveBeenCalledTimes(1);
   });
 
@@ -128,7 +139,7 @@ describe("createFolderPath", () => {
 
     const result = await createFolderPath(provider, "Receipts/", logger);
 
-    expect(result.name).toBe("Receipts");
+    expect(result.folder.name).toBe("Receipts");
     expect(provider.createFolder).toHaveBeenCalledTimes(1);
   });
 
@@ -138,5 +149,19 @@ describe("createFolderPath", () => {
     await expect(createFolderPath(provider, "", logger)).rejects.toThrow(
       "Failed to create folder path",
     );
+  });
+
+  it("should match existing normalized microsoft folders", async () => {
+    const existingFolders = new Map<string | undefined, DriveFolder[]>([
+      [undefined, [createMockFolder("existing-1", "Plans-2026")]],
+    ]);
+    const provider = createMockProvider(existingFolders, "microsoft");
+
+    const result = await createFolderPath(provider, "Plans:2026", logger);
+
+    expect(result.folder.id).toBe("existing-1");
+    expect(result.folder.name).toBe("Plans-2026");
+    expect(result.allFolders[0].path).toBe("Plans-2026");
+    expect(provider.createFolder).not.toHaveBeenCalled();
   });
 });

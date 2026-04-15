@@ -7,7 +7,7 @@ import groupBy from "lodash/groupBy";
 import { CheckIcon, ChevronDownIcon, MailIcon, PencilIcon } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { ButtonCheckbox } from "@/components/ButtonCheckbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
@@ -30,8 +30,8 @@ import { useThreads } from "@/hooks/useThreads";
 import { formatShortDate } from "@/utils/date";
 import { cn } from "@/utils";
 import {
-  addToArchiveSenderQueue,
   useArchiveSenderStatus,
+  useArchiveSenderQueueActions,
 } from "@/store/archive-sender-queue";
 import {
   addToMarkReadSenderQueue,
@@ -60,6 +60,7 @@ export function BulkArchiveCards({
   onCategoryChange?: () => Promise<unknown>;
 }) {
   const { emailAccountId, userEmail } = useAccount();
+  const { queueArchiveSenders } = useArchiveSenderQueueActions(emailAccountId);
   const [expandedCategory, setExpandedCategory] = useQueryState("expanded");
   const [expandedSenders, setExpandedSenders] = useState<
     Record<string, boolean>
@@ -155,11 +156,7 @@ export function BulkArchiveCards({
     setSelectedSenders(newSelected);
   };
 
-  const toggleSenderSelection = (
-    senderAddress: string,
-    e: React.MouseEvent,
-  ) => {
-    e.stopPropagation();
+  const toggleSenderSelection = (senderAddress: string) => {
     setSelectedSenders((prev) => ({
       ...prev,
       [senderAddress]: !prev[senderAddress],
@@ -169,6 +166,48 @@ export function BulkArchiveCards({
   const getSelectedCount = (categoryName: string) => {
     const senders = groupedEmails[categoryName] || [];
     return senders.filter((s) => selectedSenders[s.address] !== false).length;
+  };
+
+  const areAllSelectedInCategory = (categoryName: string) => {
+    const senders = groupedEmails[categoryName] || [];
+    if (senders.length === 0) return false;
+    return senders.every((s) => selectedSenders[s.address] !== false);
+  };
+
+  const areSomeSelectedInCategory = (categoryName: string) => {
+    const senders = groupedEmails[categoryName] || [];
+    const selectedCount = getSelectedCount(categoryName);
+    return selectedCount > 0 && selectedCount < senders.length;
+  };
+
+  const selectAllInCategory = (categoryName: string) => {
+    const senders = groupedEmails[categoryName] || [];
+    setSelectedSenders((prev) => {
+      const newSelected = { ...prev };
+      for (const sender of senders) {
+        newSelected[sender.address] = true;
+      }
+      return newSelected;
+    });
+  };
+
+  const deselectAllInCategory = (categoryName: string) => {
+    const senders = groupedEmails[categoryName] || [];
+    setSelectedSenders((prev) => {
+      const newSelected = { ...prev };
+      for (const sender of senders) {
+        newSelected[sender.address] = false;
+      }
+      return newSelected;
+    });
+  };
+
+  const toggleSelectAllInCategory = (categoryName: string) => {
+    if (areAllSelectedInCategory(categoryName)) {
+      deselectAllInCategory(categoryName);
+    } else {
+      selectAllInCategory(categoryName);
+    }
   };
 
   const actionLabels = getActionLabels(bulkAction);
@@ -192,14 +231,18 @@ export function BulkArchiveCards({
             sender: sender.address,
             emailAccountId,
           });
-        } else {
-          await addToArchiveSenderQueue({
-            sender: sender.address,
-            emailAccountId,
-          });
         }
       }
-      setArchivedCategories((prev) => ({ ...prev, [categoryName]: true }));
+
+      if (bulkAction === "archive") {
+        await queueArchiveSenders({
+          senders: selectedToProcess.map((sender) => sender.address),
+        });
+      }
+
+      if (bulkAction === "markRead") {
+        setArchivedCategories((prev) => ({ ...prev, [categoryName]: true }));
+      }
     } catch (_error) {
       toastError({
         description: `Failed to ${bulkAction === "markRead" ? "mark as read" : "archive"} some senders. Please try again.`,
@@ -276,9 +319,6 @@ export function BulkArchiveCards({
                     <p className="text-sm text-muted-foreground">
                       {senders.length} senders
                       {isArchived && " archived"}
-                      {!isArchived &&
-                        (category?.description || defaultCat?.description) &&
-                        ` · ${category?.description || defaultCat?.description}`}
                     </p>
                   </div>
                 </div>
@@ -328,22 +368,40 @@ export function BulkArchiveCards({
                       No senders in this category
                     </div>
                   ) : (
-                    senders.map((sender) => (
-                      <SenderRow
-                        key={sender.address}
-                        sender={sender}
-                        isExpanded={!!expandedSenders[sender.address]}
-                        isSelected={selectedSenders[sender.address] !== false}
-                        onToggle={() => toggleSender(sender.address)}
-                        onToggleSelection={(e) =>
-                          toggleSenderSelection(sender.address, e)
-                        }
-                        userEmail={userEmail}
-                        categories={categories}
-                        emailAccountId={emailAccountId}
-                        onCategoryChange={onCategoryChange}
-                      />
-                    ))
+                    <>
+                      {/* Select all row */}
+                      <div className="flex items-center gap-3 bg-muted/30 px-4 py-3">
+                        <ButtonCheckbox
+                          checked={areAllSelectedInCategory(categoryName)}
+                          indeterminate={areSomeSelectedInCategory(
+                            categoryName,
+                          )}
+                          onChange={() =>
+                            toggleSelectAllInCategory(categoryName)
+                          }
+                        />
+                        <span className="text-sm text-muted-foreground">
+                          {getSelectedCount(categoryName)} of {senders.length}{" "}
+                          selected
+                        </span>
+                      </div>
+                      {senders.map((sender) => (
+                        <SenderRow
+                          key={sender.address}
+                          sender={sender}
+                          isExpanded={!!expandedSenders[sender.address]}
+                          isSelected={selectedSenders[sender.address] !== false}
+                          onToggle={() => toggleSender(sender.address)}
+                          onToggleSelection={() =>
+                            toggleSenderSelection(sender.address)
+                          }
+                          userEmail={userEmail}
+                          categories={categories}
+                          emailAccountId={emailAccountId}
+                          onCategoryChange={onCategoryChange}
+                        />
+                      ))}
+                    </>
                   )}
                 </div>
               </div>
@@ -370,21 +428,21 @@ function SenderRow({
   isExpanded: boolean;
   isSelected: boolean;
   onToggle: () => void;
-  onToggleSelection: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  onToggleSelection: () => void;
   userEmail: string;
   categories: CategoryWithRules[];
   emailAccountId: string;
   onCategoryChange?: () => Promise<unknown>;
 }) {
-  const archiveStatus = useArchiveSenderStatus(sender.address);
+  const archiveStatus = useArchiveSenderStatus(emailAccountId, sender.address);
   const markReadStatus = useMarkReadSenderStatus(sender.address);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   return (
-    <div className={cn(!isSelected && "opacity-50")}>
+    <div>
       {/* Sender row */}
       <div
-        className="flex cursor-pointer items-center gap-3 p-4 transition-colors hover:bg-muted/50"
+        className="flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50"
         onClick={onToggle}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -395,22 +453,16 @@ function SenderRow({
         role="button"
         tabIndex={0}
       >
-        <Checkbox
+        <ButtonCheckbox
           checked={isSelected}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleSelection(e);
-          }}
-          className="size-5"
+          onChange={() => onToggleSelection()}
         />
         <div className="min-w-0 flex-1">
           <EmailCell
             emailAddress={sender.address}
             name={sender.name}
-            className={cn(
-              "flex flex-col",
-              !isSelected && "text-muted-foreground line-through",
-            )}
+            className="min-w-0"
+            singleLine
           />
         </div>
         <div className="mr-2 text-right">
@@ -555,6 +607,16 @@ function SenderStatus({
   // Show archive status if it exists
   if (archiveStatus?.status) {
     switch (archiveStatus.status) {
+      case "pending":
+        return <span className="text-sm text-muted-foreground">Queued</span>;
+      case "processing":
+        return (
+          <span className="text-sm text-blue-600">
+            {archiveStatus.threadsTotal
+              ? `${archiveStatus.threadsTotal - archiveStatus.threadIds.length} / ${archiveStatus.threadsTotal}`
+              : "Archiving..."}
+          </span>
+        );
       case "completed":
         return (
           <span className="text-sm text-green-600">
@@ -563,17 +625,8 @@ function SenderStatus({
               : "Archived"}
           </span>
         );
-      case "processing":
-        return (
-          <span className="text-sm text-blue-600">
-            {archiveStatus.threadsTotal - archiveStatus.threadIds.length} /{" "}
-            {archiveStatus.threadsTotal}
-          </span>
-        );
-      case "pending":
-        return (
-          <span className="text-sm text-muted-foreground">Pending...</span>
-        );
+      case "failed":
+        return <span className="text-sm text-red-600">Failed</span>;
     }
   }
 

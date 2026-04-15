@@ -4,6 +4,7 @@ import clsx from "clsx";
 import Image from "next/image";
 import Script from "next/script";
 import { useTestimonialsVariant } from "@/hooks/useFeatureFlags";
+import { BRAND_NAME } from "@/utils/branding";
 
 type Testimonial = {
   body: string;
@@ -155,7 +156,7 @@ export function Testimonials() {
       <div className="mx-auto max-w-7xl px-6 lg:px-8">
         <div className="mx-auto max-w-xl text-center">
           <h2 className="text-lg font-semibold leading-8 tracking-tight text-blue-600">
-            Inbox Zero Love
+            {`${BRAND_NAME} Love`}
           </h2>
           <p className="mt-2 text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
             Join thousands who spend less time on email
@@ -231,7 +232,7 @@ function TestimonialsContent() {
             <Image
               className="h-8 w-auto flex-none"
               src={featuredTestimonial.author.logoUrl}
-              alt=""
+              alt={featuredTestimonial.author.name}
               height={32}
               width={98}
               unoptimized
@@ -268,7 +269,7 @@ function TestimonialsContent() {
                       <Image
                         className="h-10 w-10 rounded-full bg-gray-50"
                         src={testimonial.author.imageUrl}
-                        alt=""
+                        alt={testimonial.author.name}
                         width={40}
                         height={40}
                       />

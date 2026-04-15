@@ -6,40 +6,65 @@ import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/Button";
 import { Button as UIButton } from "@/components/ui/button";
-import { SectionDescription } from "@/components/Typography";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { signIn } from "@/utils/auth-client";
+import { signIn, signInWithOauth2 } from "@/utils/auth-client";
 import { WELCOME_PATH } from "@/utils/config";
 import { toastError } from "@/components/Toast";
-import { isInternalPath } from "@/utils/path";
+import { normalizeInternalPath } from "@/utils/path";
+import { getPossessiveBrandName } from "@/utils/branding";
+import { AlertBasic } from "@/components/Alert";
+import { createClientLogger } from "@/utils/logger-client";
 
-export function LoginForm() {
+const logger = createClientLogger("login/LoginForm");
+
+export function LoginForm({
+  useGoogleOauthEmulator,
+}: {
+  useGoogleOauthEmulator: boolean;
+}) {
   const searchParams = useSearchParams();
   const next = searchParams?.get("next");
+  const { callbackURL, errorCallbackURL } = getAuthCallbackUrls(next);
 
   const [loadingGoogle, setLoadingGoogle] = useState(false);
   const [loadingMicrosoft, setLoadingMicrosoft] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
 
   const handleGoogleSignIn = async () => {
     setLoadingGoogle(true);
-    const callbackURL = next && isInternalPath(next) ? next : WELCOME_PATH;
+    setGoogleError(null);
     try {
-      await signIn.social({
-        provider: "google",
-        errorCallbackURL: "/login/error",
-        callbackURL,
-      });
+      if (useGoogleOauthEmulator) {
+        const result = await signInWithOauth2({
+          providerId: "google",
+          errorCallbackURL,
+          callbackURL,
+        });
+        if (!result.url) {
+          throw new Error("Missing Google sign-in redirect URL");
+        }
+        window.location.href = result.url;
+      } else {
+        await signIn.social({
+          provider: "google",
+          errorCallbackURL,
+          callbackURL,
+        });
+      }
     } catch (error) {
-      console.error("Error signing in with Google:", error);
+      const description = getSocialSignInErrorMessage(error);
+      logger.error("Error signing in with Google", { error });
+      setGoogleError(description);
       toastError({
         title: "Error signing in with Google",
-        description: "Please try again or contact support",
+        description,
       });
     } finally {
       setLoadingGoogle(false);
@@ -47,23 +72,13 @@ export function LoginForm() {
   };
 
   const handleMicrosoftSignIn = async () => {
-    setLoadingMicrosoft(true);
-    const callbackURL = next && isInternalPath(next) ? next : WELCOME_PATH;
-    try {
-      await signIn.social({
-        provider: "microsoft",
-        errorCallbackURL: "/login/error",
-        callbackURL,
-      });
-    } catch (error) {
-      console.error("Error signing in with Microsoft:", error);
-      toastError({
-        title: "Error signing in with Microsoft",
-        description: "Please try again or contact support",
-      });
-    } finally {
-      setLoadingMicrosoft(false);
-    }
+    await handleSocialSignIn({
+      provider: "microsoft",
+      providerName: "Microsoft",
+      callbackURL,
+      errorCallbackURL,
+      setLoading: setLoadingMicrosoft,
+    });
   };
 
   return (
@@ -74,7 +89,7 @@ export function LoginForm() {
             <span className="flex items-center justify-center">
               <Image
                 src="/images/google.svg"
-                alt=""
+                alt="Google"
                 width={24}
                 height={24}
                 unoptimized
@@ -87,9 +102,9 @@ export function LoginForm() {
           <DialogHeader>
             <DialogTitle>Sign in</DialogTitle>
           </DialogHeader>
-          <SectionDescription>
-            Inbox Zero{"'"}s use and transfer of information received from
-            Google APIs to any other app will adhere to{" "}
+          <DialogDescription className="mt-1 text-sm leading-6 text-slate-700 dark:text-foreground">
+            {getPossessiveBrandName()} use and transfer of information received
+            from Google APIs to any other app will adhere to{" "}
             <a
               href="https://developers.google.com/terms/api-services-user-data-policy"
               className="underline underline-offset-4 hover:text-gray-900"
@@ -97,7 +112,14 @@ export function LoginForm() {
               Google API Services User Data
             </a>{" "}
             Policy, including the Limited Use requirements.
-          </SectionDescription>
+          </DialogDescription>
+          {googleError ? (
+            <AlertBasic
+              variant="destructive"
+              title="Failed to start Google sign-in"
+              description={googleError}
+            />
+          ) : null}
           <div>
             <Button loading={loadingGoogle} onClick={handleGoogleSignIn}>
               I agree
@@ -114,7 +136,7 @@ export function LoginForm() {
         <span className="flex items-center justify-center">
           <Image
             src="/images/microsoft.svg"
-            alt=""
+            alt="Microsoft"
             width={24}
             height={24}
             unoptimized
@@ -133,4 +155,58 @@ export function LoginForm() {
       </UIButton>
     </div>
   );
+}
+
+function getAuthCallbackUrls(next: string | null) {
+  const callbackURL = normalizeInternalPath(next) ?? WELCOME_PATH;
+  const errorCallbackURL = isOrganizationInvitationPath(callbackURL)
+    ? "/login/error?reason=org_invite"
+    : "/login/error";
+
+  return { callbackURL, errorCallbackURL };
+}
+
+function isOrganizationInvitationPath(path: string) {
+  const pathname = path.split("?")[0];
+  return /^\/organizations\/invitations\/[^/]+\/accept\/?$/.test(pathname);
+}
+
+async function handleSocialSignIn({
+  provider,
+  providerName,
+  callbackURL,
+  errorCallbackURL,
+  setLoading,
+}: {
+  provider: "google" | "microsoft";
+  providerName: "Google" | "Microsoft";
+  callbackURL: string;
+  errorCallbackURL: string;
+  setLoading: (loading: boolean) => void;
+}) {
+  setLoading(true);
+  try {
+    await signIn.social({
+      provider,
+      errorCallbackURL,
+      callbackURL,
+    });
+  } catch (error) {
+    const description = getSocialSignInErrorMessage(error);
+    logger.error(`Error signing in with ${providerName}`, { error });
+    toastError({
+      title: `Error signing in with ${providerName}`,
+      description,
+    });
+  } finally {
+    setLoading(false);
+  }
+}
+
+function getSocialSignInErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return "Please try again or contact support.";
 }

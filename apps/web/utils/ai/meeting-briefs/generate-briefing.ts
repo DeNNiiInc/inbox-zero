@@ -14,6 +14,7 @@ import { stringifyEmailSimple } from "@/utils/stringify-email";
 import { getEmailForLLM } from "@/utils/get-email-from-message";
 import type { ParsedMessage } from "@/utils/types";
 import { formatDateTimeInUserTimezone } from "@/utils/date";
+import { getMessageTimestamp } from "@/utils/email/message-timestamp";
 import {
   getCachedResearch,
   setCachedResearch,
@@ -106,6 +107,7 @@ export async function aiGenerateMeetingBriefing({
     emailAccount,
     label: "Meeting Briefing",
     modelOptions,
+    promptHardening: { trust: "untrusted", level: "full" },
   });
 
   let result: BriefingContent | null = null;
@@ -214,8 +216,10 @@ async function buildSearchTools({
               modelName: "sonar-pro",
               model: perplexity("sonar-pro"),
               provider: "perplexity",
-              backupModel: null,
+              fallbackModels: [],
+              hasUserApiKey: false,
             },
+            promptHardening: { trust: "untrusted", level: "full" },
           });
 
           const searchResult = await perplexityGenerateText({
@@ -352,6 +356,7 @@ function createWebSearchTool({
           emailAccount,
           label: "Web Search",
           modelOptions,
+          promptHardening: { trust: "untrusted", level: "full" },
         });
 
         const searchResult = await webGenerateText({
@@ -508,7 +513,7 @@ function selectRecentEmailsForGuest(
 
   return messages
     .filter((m) => messageIncludesEmail(m, email))
-    .sort((a, b) => getMessageTimestampMs(b) - getMessageTimestampMs(a))
+    .sort((a, b) => getMessageTimestamp(b) - getMessageTimestamp(a))
     .slice(0, MAX_EMAILS_PER_GUEST);
 }
 
@@ -523,17 +528,6 @@ function messageIncludesEmail(
     (headers.cc?.toLowerCase().includes(emailLower) ?? false) ||
     (headers.bcc?.toLowerCase().includes(emailLower) ?? false)
   );
-}
-
-function getMessageTimestampMs(message: ParsedMessage): number {
-  const internal = message.internalDate;
-  if (internal && /^\d+$/.test(internal)) {
-    const ms = Number(internal);
-    return Number.isFinite(ms) ? ms : 0;
-  }
-
-  const parsed = Date.parse(message.date);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 // Exported for testing

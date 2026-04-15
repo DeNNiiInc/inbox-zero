@@ -6,8 +6,6 @@ export type GetThreadsResponse = {
   threads: ThreadsResponse["threads"];
 };
 
-export const dynamic = "force-dynamic";
-
 export const maxDuration = 30;
 
 export const GET = withEmailProvider("threads/basic", async (request) => {
@@ -26,7 +24,9 @@ export const GET = withEmailProvider("threads/basic", async (request) => {
       },
     });
 
-    return NextResponse.json({ threads });
+    return NextResponse.json({
+      threads,
+    });
   } catch (error) {
     request.logger.error("Error fetching basic threads", {
       error,

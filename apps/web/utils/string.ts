@@ -1,11 +1,18 @@
 import he from "he";
 
 export function escapeHtml(text: string): string {
-  return he.encode(text, { useNamedReferences: true });
+  return he.escape(text);
 }
 
 export function truncate(str: string, length: number) {
   return str.length > length ? `${str.slice(0, length)}...` : str;
+}
+
+export function trimToNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+
+  const trimmedValue = value.trim();
+  return trimmedValue.length > 0 ? trimmedValue : undefined;
 }
 
 export function removeExcessiveWhitespace(str: string) {

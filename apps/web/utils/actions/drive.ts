@@ -5,8 +5,10 @@ import {
   disconnectDriveBody,
   updateFilingPromptBody,
   updateFilingEnabledBody,
+  updateFilingConfirmationEmailBody,
   addFilingFolderBody,
   removeFilingFolderBody,
+  cleanupStaleFilingFoldersBody,
   submitPreviewFeedbackBody,
   moveFilingBody,
   createDriveFolderBody,
@@ -17,7 +19,7 @@ import { SafeError } from "@/utils/error";
 import { createDriveProviderWithRefresh } from "@/utils/drive/provider";
 import { createEmailProvider } from "@/utils/email/provider";
 import {
-  getExtractableAttachments,
+  getFilableAttachments,
   processAttachment,
 } from "@/utils/drive/filing-engine";
 import type { DriveProviderType } from "@/utils/drive/types";
@@ -69,6 +71,16 @@ export const updateFilingEnabledAction = actionClient
       });
     },
   );
+
+export const updateFilingConfirmationEmailAction = actionClient
+  .metadata({ name: "updateFilingConfirmationEmail" })
+  .inputSchema(updateFilingConfirmationEmailBody)
+  .action(async ({ ctx: { emailAccountId }, parsedInput: { sendEmail } }) => {
+    await prisma.emailAccount.update({
+      where: { id: emailAccountId },
+      data: { filingConfirmationSendEmail: sendEmail },
+    });
+  });
 
 export const addFilingFolderAction = actionClient
   .metadata({ name: "addFilingFolder" })
@@ -122,6 +134,26 @@ export const removeFilingFolderAction = actionClient
       where: { emailAccountId, folderId },
     });
   });
+
+export const cleanupStaleFilingFoldersAction = actionClient
+  .metadata({ name: "cleanupStaleFilingFolders" })
+  .inputSchema(cleanupStaleFilingFoldersBody)
+  .action(
+    async ({
+      ctx: { emailAccountId, logger },
+      parsedInput: { filingFolderIds },
+    }) => {
+      const result = await prisma.filingFolder.deleteMany({
+        where: { emailAccountId, id: { in: filingFolderIds } },
+      });
+
+      logger.info("Cleaned up stale filing folders", {
+        count: result.count,
+      });
+
+      return { count: result.count };
+    },
+  );
 
 export const submitPreviewFeedbackAction = actionClient
   .metadata({ name: "submitPreviewFeedback" })
@@ -224,12 +256,13 @@ export type FileAttachmentFiled = {
   skipped?: false;
 };
 
-export type FileAttachmentResult =
-  | FileAttachmentFiled
-  | {
-      skipped: true;
-      skipReason: string;
-    };
+export type FileAttachmentSkipped = {
+  skipped: true;
+  skipReason: string;
+  filingId: string;
+};
+
+export type FileAttachmentResult = FileAttachmentFiled | FileAttachmentSkipped;
 
 export const fileAttachmentAction = actionClient
   .metadata({ name: "fileAttachment" })
@@ -251,6 +284,7 @@ export const fileAttachmentAction = actionClient
           calendarBookingLink: true,
           filingEnabled: true,
           filingPrompt: true,
+          filingConfirmationSendEmail: true,
           user: {
             select: {
               aiProvider: true,
@@ -287,13 +321,13 @@ export const fileAttachmentAction = actionClient
         throw new SafeError("Message not found");
       }
 
-      const extractableAttachments = getExtractableAttachments(message);
-      const attachment = extractableAttachments.find(
+      const filableAttachments = getFilableAttachments(message);
+      const attachment = filableAttachments.find(
         (a) => a.filename === filename,
       );
 
       if (!attachment) {
-        throw new SafeError("Attachment not found or not extractable");
+        throw new SafeError("Attachment not found");
       }
 
       logger.info("Processing attachment", { filename: attachment.filename });
@@ -311,10 +345,14 @@ export const fileAttachmentAction = actionClient
       });
 
       if (result.skipped) {
+        if (!result.filingId) {
+          throw new SafeError("Skipped filing missing ID");
+        }
         return {
           skipped: true,
           skipReason:
             result.skipReason || "Document doesn't match filing preferences",
+          filingId: result.filingId,
         };
       }
 

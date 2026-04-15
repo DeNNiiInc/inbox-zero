@@ -1,6 +1,20 @@
 import { auth } from "@googleapis/drive";
 import { env } from "@/env";
-import { GOOGLE_DRIVE_SCOPES, MICROSOFT_DRIVE_SCOPES } from "./scopes";
+import {
+  fetchGoogleOpenIdProfile,
+  getGoogleOauthClientOptions,
+  isGoogleOauthEmulationEnabled,
+} from "@/utils/google/oauth";
+import {
+  fetchMicrosoftUserProfile,
+  getMicrosoftOauthAuthorizeUrl,
+  requestMicrosoftToken,
+} from "@/utils/microsoft/oauth";
+import {
+  GOOGLE_DRIVE_FULL_SCOPES,
+  GOOGLE_DRIVE_SCOPES,
+  MICROSOFT_DRIVE_SCOPES,
+} from "./scopes";
 
 // ============================================================================
 // Google Drive OAuth
@@ -10,21 +24,28 @@ import { GOOGLE_DRIVE_SCOPES, MICROSOFT_DRIVE_SCOPES } from "./scopes";
  * Creates an OAuth2 client for Google Drive authentication
  */
 export function getGoogleDriveOAuth2Client() {
-  return new auth.OAuth2({
-    clientId: env.GOOGLE_CLIENT_ID,
-    clientSecret: env.GOOGLE_CLIENT_SECRET,
-    redirectUri: `${env.NEXT_PUBLIC_BASE_URL}/api/google/drive/callback`,
-  });
+  return new auth.OAuth2(
+    getGoogleOauthClientOptions(
+      `${env.NEXT_PUBLIC_BASE_URL}/api/google/drive/callback`,
+    ),
+  );
 }
 
 /**
  * Generates the OAuth2 URL for Google Drive
  */
-export function getGoogleDriveOAuth2Url(state: string): string {
+export type GoogleDriveAccessLevel = "limited" | "full";
+
+export function getGoogleDriveOAuth2Url(
+  state: string,
+  accessLevel: GoogleDriveAccessLevel = "limited",
+): string {
   const oauth2Client = getGoogleDriveOAuth2Client();
+  const scopes =
+    accessLevel === "full" ? GOOGLE_DRIVE_FULL_SCOPES : GOOGLE_DRIVE_SCOPES;
   return oauth2Client.generateAuthUrl({
     access_type: "offline",
-    scope: [...GOOGLE_DRIVE_SCOPES],
+    scope: [...scopes],
     state,
     prompt: "consent",
   });
@@ -41,13 +62,33 @@ export async function exchangeGoogleDriveCode(code: string) {
     throw new Error("No access or refresh token returned from Google");
   }
 
-  // Get user email from ID token
-  if (!tokens.id_token) {
+  const profile = isGoogleOauthEmulationEnabled()
+    ? await fetchGoogleOpenIdProfile(tokens.access_token)
+    : await verifyGoogleIdTokenPayload(oauth2Client, tokens.id_token);
+  const email = profile.email;
+
+  if (!email) {
+    throw new Error("Could not get email from Google profile");
+  }
+
+  return {
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+    email,
+  };
+}
+
+async function verifyGoogleIdTokenPayload(
+  oauth2Client: ReturnType<typeof getGoogleDriveOAuth2Client>,
+  idToken: string | null | undefined,
+) {
+  if (!idToken) {
     throw new Error("No ID token returned from Google");
   }
 
   const ticket = await oauth2Client.verifyIdToken({
-    idToken: tokens.id_token,
+    idToken,
     audience: env.GOOGLE_CLIENT_ID,
   });
   const payload = ticket.getPayload();
@@ -56,12 +97,7 @@ export async function exchangeGoogleDriveCode(code: string) {
     throw new Error("Could not get email from Google ID token");
   }
 
-  return {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-    email: payload.email,
-  };
+  return payload;
 }
 
 // ============================================================================
@@ -76,7 +112,6 @@ export function getMicrosoftDriveOAuth2Url(state: string): string {
     throw new Error("Microsoft login not enabled - missing client ID");
   }
 
-  const baseUrl = `https://login.microsoftonline.com/${env.MICROSOFT_TENANT_ID}/oauth2/v2.0/authorize`;
   const params = new URLSearchParams({
     client_id: env.MICROSOFT_CLIENT_ID,
     response_type: "code",
@@ -86,7 +121,7 @@ export function getMicrosoftDriveOAuth2Url(state: string): string {
     state,
   });
 
-  return `${baseUrl}?${params.toString()}`;
+  return `${getMicrosoftOauthAuthorizeUrl()}?${params.toString()}`;
 }
 
 /**
@@ -97,23 +132,14 @@ export async function exchangeMicrosoftDriveCode(code: string) {
     throw new Error("Microsoft login not enabled - missing credentials");
   }
 
-  const response = await fetch(
-    `https://login.microsoftonline.com/${env.MICROSOFT_TENANT_ID}/oauth2/v2.0/token`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        client_id: env.MICROSOFT_CLIENT_ID,
-        client_secret: env.MICROSOFT_CLIENT_SECRET,
-        code,
-        redirect_uri: `${env.NEXT_PUBLIC_BASE_URL}/api/outlook/drive/callback`,
-        grant_type: "authorization_code",
-        scope: MICROSOFT_DRIVE_SCOPES.join(" "),
-      }),
-    },
-  );
+  const response = await requestMicrosoftToken({
+    client_id: env.MICROSOFT_CLIENT_ID,
+    client_secret: env.MICROSOFT_CLIENT_SECRET,
+    code,
+    redirect_uri: `${env.NEXT_PUBLIC_BASE_URL}/api/outlook/drive/callback`,
+    grant_type: "authorization_code",
+    scope: MICROSOFT_DRIVE_SCOPES.join(" "),
+  });
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
@@ -126,23 +152,7 @@ export async function exchangeMicrosoftDriveCode(code: string) {
     throw new Error("No access or refresh token returned from Microsoft");
   }
 
-  // Get user email from Microsoft Graph
-  const profileResponse = await fetch("https://graph.microsoft.com/v1.0/me", {
-    headers: {
-      Authorization: `Bearer ${tokens.access_token}`,
-    },
-  });
-
-  if (!profileResponse.ok) {
-    throw new Error("Failed to get user profile from Microsoft");
-  }
-
-  const profile = await profileResponse.json();
-  const email = profile.mail || profile.userPrincipalName;
-
-  if (!email) {
-    throw new Error("Could not get email from Microsoft profile");
-  }
+  const { email } = await fetchMicrosoftUserProfile(tokens.access_token);
 
   return {
     accessToken: tokens.access_token as string,
@@ -150,6 +160,6 @@ export async function exchangeMicrosoftDriveCode(code: string) {
     expiresAt: tokens.expires_in
       ? new Date(Date.now() + tokens.expires_in * 1000)
       : null,
-    email: email as string,
+    email,
   };
 }

@@ -15,11 +15,14 @@ import { NextRequest } from "next/server";
 import prisma from "@/utils/prisma";
 import { createEmailProvider } from "@/utils/email/provider";
 import type { GmailProvider } from "@/utils/email/google";
+import { createTestLogger } from "@/__tests__/helpers";
 import {
   ensureCatchAllTestRule,
   ensureTestPremiumAccount,
   findOldMessage,
 } from "@/__tests__/e2e/helpers";
+
+const logger = createTestLogger();
 
 // ============================================
 // TEST DATA - SET VIA ENVIRONMENT VARIABLES
@@ -32,7 +35,10 @@ let TEST_GMAIL_MESSAGE_ID =
 vi.mock("server-only", () => ({}));
 
 vi.mock("@/utils/redis/message-processing", () => ({
+  acquireOutboundMessageLock: vi.fn().mockResolvedValue("lock-token-1"),
+  clearOutboundMessageLock: vi.fn().mockResolvedValue(true),
   markMessageAsProcessing: vi.fn().mockResolvedValue(true),
+  markOutboundMessageProcessed: vi.fn().mockResolvedValue(true),
 }));
 
 // Mock Next.js after() to run immediately in tests
@@ -70,6 +76,7 @@ describe.skipIf(!RUN_E2E_TESTS)("Gmail Webhook Payload", () => {
       const provider = (await createEmailProvider({
         emailAccountId: emailAccount.id,
         provider: "google",
+        logger,
       })) as GmailProvider;
 
       try {
@@ -198,6 +205,7 @@ describe.skipIf(!RUN_E2E_TESTS)("Gmail Webhook Payload", () => {
       const provider = (await createEmailProvider({
         emailAccountId: emailAccount.id,
         provider: "google",
+        logger,
       })) as GmailProvider;
 
       const draft = await provider.getDraft(draftAction.draftId);
@@ -214,7 +222,7 @@ describe.skipIf(!RUN_E2E_TESTS)("Gmail Webhook Payload", () => {
       console.log(`      Subject: ${draft?.subject || "(no subject)"}`);
       console.log("      Content:");
       console.log(
-        `        ${draft?.textPlain?.substring(0, 200).replace(/\n/g, "\n        ") || "(empty)"}`,
+        `        ${draft?.textPlain?.slice(0, 200).replace(/\n/g, "\n        ") || "(empty)"}`,
       );
       if (draft?.textPlain && draft.textPlain.length > 200) {
         console.log(`        ... (${draft.textPlain.length} total characters)`);

@@ -6,12 +6,12 @@ import { cleanupOrphanedAccount } from "@/utils/user/orphaned-account";
 
 interface AccountLinkingParams {
   existingAccountId: string | null;
-  hasEmailAccount: boolean;
   existingUserId: string | null;
-  targetUserId: string;
+  hasEmailAccount: boolean;
+  logger: Logger;
   provider: "google" | "microsoft";
   providerEmail: string;
-  logger: Logger;
+  targetUserId: string;
 }
 
 export async function handleAccountLinking({
@@ -29,6 +29,19 @@ export async function handleAccountLinking({
   | { type: "update_tokens"; existingAccountId: string }
 > {
   const redirectUrl = new URL("/accounts", env.NEXT_PUBLIC_BASE_URL);
+  const hasActiveTargetUser = await hasActiveAccountLinkingUser({
+    targetUserId,
+    logger,
+  });
+
+  if (!hasActiveTargetUser) {
+    return {
+      type: "redirect",
+      response: NextResponse.redirect(
+        new URL("/logout", env.NEXT_PUBLIC_BASE_URL),
+      ),
+    };
+  }
 
   if (existingAccountId && !hasEmailAccount) {
     logger.warn("Found orphaned Account, cleaning up", {
@@ -99,4 +112,25 @@ export async function handleAccountLinking({
     sourceAccountId: existingAccountId,
     sourceUserId: existingUserId,
   };
+}
+
+export async function hasActiveAccountLinkingUser({
+  targetUserId,
+  logger,
+}: {
+  targetUserId: string;
+  logger: Logger;
+}) {
+  const user = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { id: true },
+  });
+
+  if (user) return true;
+
+  logger.warn("Account linking attempted with deleted user in session", {
+    targetUserId,
+  });
+
+  return false;
 }

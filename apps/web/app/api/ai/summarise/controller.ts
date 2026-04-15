@@ -20,6 +20,9 @@ export async function summarise({
 
   const response = await chatCompletionStream({
     userAi: userAi.user,
+    userId: userAi.userId,
+    emailAccountId: userAi.id,
+    promptHardening: { trust: "untrusted", level: "compact" },
     messages: [
       {
         role: "system",

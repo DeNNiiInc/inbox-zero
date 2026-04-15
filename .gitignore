@@ -8,6 +8,8 @@ node_modules
 
 # testing
 /coverage
+/apps/web/test-results/
+/apps/web/playwright-report/
 
 # next.js
 /.next/
@@ -28,9 +30,13 @@ yarn-error.log*
 # local env files - ignore ALL .env files except .env.example
 .env*
 !.env.example
+/json.env
 
 # vercel
 .vercel
+.wrangler
+.dev.vars
+.dev.vars.*
 
 # typescript
 *.tsbuildinfo
@@ -78,9 +84,30 @@ logs
 
 coverage
 
-# secrets and credentials
-secrets.php
+# Copilot local workspace state
+copilot/.workspace
+copilot/environments/**/manifest.yml
 
-/apps/web/app/(app)/\[emailAccountId\]/demo/*secrets.php
-deployment.tar.gz
-node-v22.12.0-linux-x64/
+/apps/web/app/(app)/\[emailAccountId\]/demo/*
+
+# Cursor
+.cursor/plans/
+
+# AI SDK devtools
+.devtools/
+
+# browser QA flow results
+qa/browser-flows/results/*
+!qa/browser-flows/results/README.md
+
+# local skills
+.claude/skills/local/
+.agents/skills/local/
+
+# local claude hooks (personal nested repo)
+.claude/local/
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+
+# eval reports
+eval-results/

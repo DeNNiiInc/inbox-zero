@@ -25,6 +25,16 @@ export default async function DebugPage(props: {
             Rule History
           </Link>
         </Button>
+        <Button variant="outline" asChild>
+          <Link href={prefixPath(emailAccountId, "/debug/follow-up")}>
+            Follow-up
+          </Link>
+        </Button>
+        <Button variant="outline" asChild>
+          <Link href={prefixPath(emailAccountId, "/debug/memories")}>
+            Memories
+          </Link>
+        </Button>
         {/* <Button variant="outline" asChild>
           <Link href={prefixPath(emailAccountId, "/debug/report")}>Report</Link>
         </Button> */}

@@ -23,36 +23,19 @@ export type SaveEmailUpdateSettingsBody = z.infer<
   typeof saveEmailUpdateSettingsBody
 >;
 
-export const saveAiSettingsBody = z
-  .object({
-    aiProvider: z.enum([
-      DEFAULT_PROVIDER,
-      Provider.ANTHROPIC,
-      Provider.OPEN_AI,
-      Provider.GOOGLE,
-      Provider.GROQ,
-      Provider.OPENROUTER,
-      Provider.OLLAMA,
-    ]),
-    aiModel: z.string(),
-    aiApiKey: z.string().optional(),
-  })
-  .superRefine((val, ctx) => {
-    if (
-      !val.aiApiKey &&
-      val.aiProvider !== DEFAULT_PROVIDER &&
-      val.aiProvider !== Provider.OLLAMA &&
-      val.aiProvider !== Provider.OPEN_AI &&
-      val.aiProvider !== Provider.ANTHROPIC &&
-      val.aiProvider !== Provider.OPENROUTER
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "You must provide an API key for this provider",
-        path: ["aiApiKey"],
-      });
-    }
-  });
+export const saveAiSettingsBody = z.object({
+  aiProvider: z.enum([
+    DEFAULT_PROVIDER,
+    Provider.ANTHROPIC,
+    Provider.OPEN_AI,
+    Provider.AZURE,
+    Provider.GOOGLE,
+    Provider.GROQ,
+    Provider.OPENROUTER,
+  ]),
+  aiModel: z.string(),
+  aiApiKey: z.string().optional(),
+});
 export type SaveAiSettingsBody = z.infer<typeof saveAiSettingsBody>;
 
 export const updateDigestItemsBody = z.object({
@@ -62,5 +45,6 @@ export type UpdateDigestItemsBody = z.infer<typeof updateDigestItemsBody>;
 
 export const toggleDigestBody = z.object({
   enabled: z.boolean(),
+  timeOfDay: z.coerce.date().optional(),
 });
 export type ToggleDigestBody = z.infer<typeof toggleDigestBody>;

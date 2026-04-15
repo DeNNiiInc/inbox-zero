@@ -3,6 +3,22 @@ import { convertEmailHtmlToText, parseReply } from "@/utils/mail";
 import { stripQuotedContent } from "@/utils/ai/choose-rule/draft-management";
 import type { ParsedMessage } from "@/utils/types";
 
+const HTML_TAG_NAMES = [
+  "html",
+  "head",
+  "body",
+  "div",
+  "p",
+  "br",
+  "a",
+  "span",
+  "table",
+  "tr",
+  "td",
+  "blockquote",
+  "meta",
+];
+
 /**
  * Normalizes content for Outlook (HTML) comparison.
  * Converts \n to <br> and then to plain text, strips quoted content.
@@ -17,12 +33,41 @@ function normalizeForOutlook(content: string): string {
 }
 
 /**
+ * Decodes HTML entities (e.g., &#x1F44B; -> 👋) without modifying other content.
+ * Invalid code points (> 0x10FFFF) are left unchanged to avoid RangeError.
+ */
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&#x([0-9a-fA-F]+);/g, (match, hex) => {
+      const codePoint = Number.parseInt(hex, 16);
+      if (!Number.isFinite(codePoint) || codePoint > 0x10_ff_ff) {
+        return match;
+      }
+      return String.fromCodePoint(codePoint);
+    })
+    .replace(/&#(\d+);/g, (match, dec) => {
+      const codePoint = Number.parseInt(dec, 10);
+      if (!Number.isFinite(codePoint) || codePoint > 0x10_ff_ff) {
+        return match;
+      }
+      return String.fromCodePoint(codePoint);
+    });
+}
+
+/**
  * Normalizes content for Gmail (plain text) comparison.
- * Uses parseReply to extract the reply and strips quoted content.
+ * Uses parseReply to extract the reply, decodes HTML entities, and strips quoted content.
  */
 function normalizeForGmail(content: string): string {
-  const reply = parseReply(content);
-  return reply.toLowerCase().trim();
+  const plainText = looksLikeHtmlContent(content)
+    ? convertEmailHtmlToText({
+        htmlText: content.replace(/\n/g, "<br>"),
+        includeLinks: false,
+      })
+    : content;
+  const reply = parseReply(plainText);
+  const decoded = decodeHtmlEntities(reply);
+  return decoded.toLowerCase().trim();
 }
 
 /**
@@ -69,4 +114,15 @@ export function calculateSimilarity(
   }
 
   return stringSimilarity.compareTwoStrings(normalized1, normalized2);
+}
+
+function looksLikeHtmlContent(content: string): boolean {
+  const lowerContent = content.toLowerCase();
+
+  if (lowerContent.includes("<!doctype html")) return true;
+
+  return HTML_TAG_NAMES.some(
+    (tag) =>
+      lowerContent.includes(`<${tag}`) || lowerContent.includes(`</${tag}>`),
+  );
 }

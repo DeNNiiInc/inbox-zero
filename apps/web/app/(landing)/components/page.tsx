@@ -37,16 +37,19 @@ import {
   MultiSelectFilter,
   useMultiSelectFilter,
 } from "@/components/MultiSelectFilter";
+import { TagInput } from "@/components/TagInput";
 import { TooltipExplanation } from "@/components/TooltipExplanation";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { PremiumAiAssistantAlert } from "@/components/PremiumAlert";
 import { ActionType, ExecutedRuleStatus } from "@/generated/prisma/enums";
 import type { Rule } from "@/generated/prisma/client";
 import { SettingCard } from "@/components/SettingCard";
 import { IconCircle } from "@/app/(app)/[emailAccountId]/onboarding/IconCircle";
+import { isValidEmail } from "@/utils/email";
 import { ActionBadges } from "@/app/(app)/[emailAccountId]/assistant/Rules";
 import { DismissibleVideoCard } from "@/components/VideoCard";
 import { PremiumExpiredCardContent } from "@/components/PremiumCard";
+import { AnnouncementDialogDemo } from "@/components/feature-announcements/AnnouncementDialogDemo";
 import {
   ResultsDisplay,
   ResultDisplayContent,
@@ -62,11 +65,24 @@ export default function Components() {
   const { selectedValues, setSelectedValues } = useMultiSelectFilter([
     "alerts",
   ]);
-
+  const [basicTags, setBasicTags] = useState<string[]>(["react", "typescript"]);
+  const [emailTags, setEmailTags] = useState<string[]>([
+    "alice@example.com",
+    "bob@example.com",
+  ]);
   return (
     <Container>
       <div className="space-y-8 py-8">
         <h1>A Storybook style page demoing components we use.</h1>
+
+        <div className="space-y-1">
+          <div>
+            <TextLink href="/components/tools">Assistant Tools →</TextLink>
+          </div>
+          <div>
+            <TextLink href="/components/chat">Chat Components →</TextLink>
+          </div>
+        </div>
 
         <div className="space-y-6">
           <div className="underline">Typography</div>
@@ -320,6 +336,13 @@ export default function Components() {
               thumbnailSrc="https://img.youtube.com/vi/SoeNDVr7ve4/0.jpg"
               storageKey={`video-dismissible-${Date.now()}`}
             />
+          </div>
+        </div>
+
+        <div>
+          <div className="underline">AnnouncementDialog</div>
+          <div className="mt-4">
+            <AnnouncementDialogDemo />
           </div>
         </div>
 
@@ -629,6 +652,65 @@ export default function Components() {
                 }}
               />
             </div>
+
+            <div className="p-4 border border-border rounded mt-4">
+              <ResultDisplayContent
+                result={{
+                  createdAt: new Date("2025-01-01"),
+                  reason:
+                    "The email looks automated and part of an existing thread, so no eligible rule was selected.",
+                  status: ExecutedRuleStatus.SKIPPED,
+                  selectionMetadata: {
+                    isThread: true,
+                    skippedThreadRuleNames: [
+                      "Notification",
+                      "Newsletter",
+                      "Marketing",
+                    ],
+                    continuedThreadRuleNames: [],
+                    learnedPatternExcludedRules: [],
+                    filteredConversationRuleNames: [],
+                    conversationFilterReason: undefined,
+                    remainingAiRuleNames: [],
+                  },
+                }}
+              />
+            </div>
+
+            <div className="p-4 border border-border rounded mt-4">
+              <ResultDisplayContent
+                result={{
+                  createdAt: new Date("2025-01-01"),
+                  reason:
+                    "A learned exclusion removed the expected system rule before AI matching.",
+                  status: ExecutedRuleStatus.SKIPPED,
+                  selectionMetadata: {
+                    isThread: false,
+                    skippedThreadRuleNames: [],
+                    continuedThreadRuleNames: [],
+                    learnedPatternExcludedRules: [
+                      {
+                        ruleId: "notification-rule",
+                        ruleName: "Notification",
+                        groupId: "notification-group",
+                        groupName: "Notification",
+                        itemType: "FROM",
+                        itemValue: "updates@example.com",
+                      },
+                    ],
+                    filteredConversationRuleNames: [],
+                    conversationFilterReason: undefined,
+                    remainingAiRuleNames: [
+                      "Calendar",
+                      "Receipt",
+                      "Marketing",
+                      "Newsletter",
+                      "Conversations",
+                    ],
+                  },
+                }}
+              />
+            </div>
           </div>
         </div>
 
@@ -716,6 +798,50 @@ export default function Components() {
         </div>
 
         <div>
+          <div className="underline">TagInput</div>
+          <div className="mt-4 space-y-6">
+            <div>
+              <MutedText className="mb-2">
+                Basic (type and press Enter):
+              </MutedText>
+              <TagInput
+                value={basicTags}
+                onChange={setBasicTags}
+                placeholder="Add tags..."
+                label="Tags"
+                className="max-w-md"
+              />
+            </div>
+            <div>
+              <MutedText className="mb-2">With email validation:</MutedText>
+              <TagInput
+                value={emailTags}
+                onChange={setEmailTags}
+                placeholder="Enter email addresses"
+                label="Email addresses"
+                validate={(email) =>
+                  isValidEmail(email)
+                    ? null
+                    : "Please enter a valid email address"
+                }
+                className="max-w-md"
+              />
+            </div>
+            <div>
+              <MutedText className="mb-2">With external error:</MutedText>
+              <TagInput
+                value={["tag1", "tag2"]}
+                onChange={() => {}}
+                placeholder="Add tags..."
+                label="Tags"
+                error="This field has an error"
+                className="max-w-md"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div>
           <div className="underline">SettingCard</div>
           <div className="mt-4 space-y-4">
             <SettingCard
@@ -767,7 +893,7 @@ export default function Components() {
                   stripeSubscriptionId: "sub_test456",
                   stripeSubscriptionStatus: "canceled",
                   lemonSqueezySubscriptionId: null,
-                  tier: "BUSINESS_MONTHLY",
+                  tier: "STARTER_MONTHLY",
                 }}
               />
             </div>
@@ -796,7 +922,7 @@ export default function Components() {
                     stripeSubscriptionId: "sub_active123",
                     stripeSubscriptionStatus: "active",
                     lemonSqueezySubscriptionId: null,
-                    tier: "BUSINESS_MONTHLY",
+                    tier: "STARTER_MONTHLY",
                   }}
                 />
                 Banner should not appear for active users

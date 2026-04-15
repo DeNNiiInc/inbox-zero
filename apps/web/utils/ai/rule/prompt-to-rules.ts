@@ -34,6 +34,7 @@ ${cleanedPromptFile}
     emailAccount,
     label: "Prompt to rules",
     modelOptions,
+    promptHardening: { trust: "trusted" },
   });
 
   const aiResponse = await generateObject({
@@ -62,128 +63,23 @@ Use short, concise rule names (preferably a single word). For example: 'Marketin
 
 IMPORTANT: If a user provides a snippet, use that full snippet in the rule. Don't include placeholders unless it's clear one is needed.
 
+Use static conditions for exact deterministic matching, but keep them short and specific.
 You can use multiple conditions in a rule, but aim for simplicity.
 In most cases, you should use the "aiInstructions" and sometimes you will use other fields in addition.
 If a rule can be handled fully with static conditions, do so, but this is rarely possible.
+If the rule is only matching exact sender addresses or domains, put those in static.from and leave aiInstructions empty. Do not restate the sender in aiInstructions.
+If the user did not specify any sender or domain, leave static.from empty. Never fill it with placeholders like none, null, or @*.
+aiInstructions are only for semantic or content matching. Do not repeat sender lists, label names, or actions there.
+Example sender-only rule shape: static.from="@airbnb.com|@booking.com|@delta.com" and no aiInstructions.
 
-IMPORTANT: You must return a JSON object.
+Output policy:
+- Return a JSON object only. No prose and no markdown.
+- The output must match the schema exactly: { "rules": [...] }.
+- Do not invent actions unsupported by the schema.
 
-<examples>
-  <example>
-    <input>
-      When I get a newsletter, archive it and label it as "Newsletter"
-    </input>
-    <output>
-      {
-        "rules": [{
-          "name": "Newsletters",
-          "condition": {
-            "aiInstructions": "Apply this rule to newsletters"
-          },
-          "actions": [
-            {
-              "type": "ARCHIVE"
-            },
-            {
-              "type": "LABEL",
-              "fields": {
-                "label": "Newsletter"
-              }
-            }
-          ]
-        }]
-      }
-    </output>
-  </example>
-
-  <example>
-    <input>
-      When someone mentions system outages or critical issues, forward to urgent-support@company.com and label as Urgent-Support
-    </input>
-    <output>
-      {
-        "rules": [{
-          "name": "Forward Urgent",
-          "condition": {
-            "aiInstructions": "Apply this rule to emails mentioning system outages or critical issues"
-          },
-          "actions": [
-            {
-              "type": "FORWARD",
-              "fields": {
-                "to": "urgent-support@company.com"
-              }
-            },
-            {
-              "type": "LABEL",
-              "fields": {
-                "label": "Urgent-Support"
-              }
-            }
-          ]
-        }]
-      }
-    </output>
-  </example>
-
-  <example>
-    <input>
-      Label all urgent emails from company.com as "Urgent"
-    </input>
-    <output>
-      {
-        "rules": [{
-          "name": "Matt Urgent Emails",
-          "condition": {
-            "conditionalOperator": "AND",
-            "aiInstructions": "Apply this rule to urgent emails",
-            "static": {
-              "from": "@company.com"
-            }
-          },
-          "actions": [
-            {
-              "type": "LABEL",
-              "fields": {
-                "label": "Urgent"
-              }
-            }
-          ]
-        }]
-      }
-    </output>
-  </example>
-
-  <example>
-    <input>
-      If someone asks to set up a call, draft a reply with my calendar link: https://cal.com/example using the following format:
-      
-      """
-      Hi [name],
-      Thank you for your message. I'll respond within 2 hours.
-      Best,
-      Alice
-      """
-    </input>
-    <output>
-      {
-        "rules": [{
-          "name": "Call Requests",
-          "condition": {
-            "aiInstructions": "Apply this rule to emails from people asking to set up a call"
-          },
-          "actions": [
-            {
-              "type": "REPLY",
-              "fields": {
-                "content": "Hi {{name}},\nThank you for your message.\nI'll respond within 2 hours.\nBest,\nAlice"
-              }
-            }
-          ]
-        }]
-      }
-    </output>
-  </example>
-</examples>
+Behavior anchors (minimal):
+- "When I get a newsletter, archive it and label it as Newsletter" -> one rule with aiInstructions plus ARCHIVE and LABEL actions.
+- "Label urgent emails from @company.com as Urgent" -> prefer aiInstructions for urgency and use static.from for @company.com with AND logic when both are present.
+- "If someone asks to set up a call, reply with this template ..." -> use the provided template content in fields.content, preserving key wording.
 `;
 }

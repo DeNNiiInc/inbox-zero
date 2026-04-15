@@ -17,7 +17,8 @@ import {
 } from "@/store/ai-categorize-sender-queue";
 import { SectionDescription } from "@/components/Typography";
 import { ButtonLoader } from "@/components/Loading";
-import { PremiumTooltip, usePremium } from "@/components/PremiumAlert";
+import { PremiumTooltip } from "@/components/PremiumAlert";
+import { usePremium } from "@/hooks/usePremium";
 import { usePremiumModal } from "@/app/(app)/premium/PremiumModal";
 import { Toggle } from "@/components/Toggle";
 import { setAutoCategorizeAction } from "@/utils/actions/categorize";
@@ -40,8 +41,8 @@ export function Uncategorized({
 
   const senders = useMemo(
     () =>
-      senderAddresses?.map((address) => {
-        return { address, category: null };
+      senderAddresses?.map((sender) => {
+        return { address: sender.email, name: sender.name, category: null };
       }),
     [senderAddresses],
   );
@@ -66,7 +67,7 @@ export function Uncategorized({
                 }
 
                 pushToAiCategorizeSenderQueueAtom({
-                  pushIds: senderAddresses,
+                  pushIds: senderAddresses.map((s) => s.email),
                   emailAccountId,
                 });
               }}

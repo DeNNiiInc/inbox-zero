@@ -4,7 +4,13 @@ import { env } from "@/env";
 import { processHistoryForUser } from "@/app/api/google/webhook/process-history";
 import type { Logger } from "@/utils/logger";
 import { handleWebhookError } from "@/utils/webhook/error-handler";
-import { getWebhookEmailAccount } from "@/utils/webhook/validate-webhook-account";
+import { runWithBackgroundLoggerFlush } from "@/utils/logger-flush";
+import {
+  cleanupWebhookAccountOnRateLimitSkip,
+  getWebhookEmailAccount,
+} from "@/utils/webhook/validate-webhook-account";
+import { getEmailProviderRateLimitState } from "@/utils/email/rate-limit";
+import { isGoogleProvider } from "@/utils/email/provider-types";
 
 export const maxDuration = 300;
 
@@ -17,15 +23,17 @@ export const POST = withError("google/webhook", async (request) => {
 
   const verificationToken = env.GOOGLE_PUBSUB_VERIFICATION_TOKEN;
 
-  if (!verificationToken) {
-    logger.error("GOOGLE_PUBSUB_VERIFICATION_TOKEN not configured");
+  if (verificationToken == null) {
+    logger.error("Google webhook verification token is not configured");
     return NextResponse.json(
-      { message: "Webhook not configured" },
-      { status: 500 },
+      { message: "Google webhook is not configured" },
+      { status: 503 },
     );
   }
 
-  if (token !== verificationToken) {
+  // Empty string intentionally disables query-param verification when
+  // requests are authenticated upstream, such as via the OIDC gateway.
+  if (verificationToken !== "" && token !== verificationToken) {
     logger.error("Invalid verification token");
     return NextResponse.json(
       { message: "Invalid verification token" },
@@ -43,9 +51,52 @@ export const POST = withError("google/webhook", async (request) => {
 
   logger.info("Received webhook - acknowledging immediately");
 
+  const emailAccount = await getWebhookEmailAccount(
+    { email: decodedData.emailAddress.toLowerCase() },
+    logger,
+  );
+
+  if (emailAccount) {
+    const activeRateLimit = await getEmailProviderRateLimitState({
+      emailAccountId: emailAccount.id,
+      logger,
+    }).catch((error) => {
+      logger.warn("Failed to read provider rate-limit state before enqueue", {
+        error: error instanceof Error ? error.message : error,
+      });
+      return null;
+    });
+
+    if (isGoogleProvider(activeRateLimit?.provider)) {
+      await cleanupWebhookAccountOnRateLimitSkip(emailAccount, logger).catch(
+        (error) => {
+          logger.warn(
+            "Failed to cleanup webhook account during rate-limit skip",
+            {
+              error: error instanceof Error ? error.message : error,
+              emailAccountId: emailAccount.id,
+            },
+          );
+        },
+      );
+      logger.warn("Skipping webhook enqueue due to active Gmail rate limit", {
+        emailAccountId: emailAccount.id,
+        retryAt: activeRateLimit.retryAt.toISOString(),
+        rateLimitSource: activeRateLimit.source,
+      });
+      return NextResponse.json({ ok: true });
+    }
+  }
+
   // Process history asynchronously using after() to avoid Pub/Sub acknowledgment timeout
   // This ensures we acknowledge the message quickly while still processing it fully
-  after(() => processWebhookAsync(decodedData, logger));
+  after(() =>
+    runWithBackgroundLoggerFlush({
+      logger,
+      task: () => processWebhookAsync(decodedData, logger, emailAccount),
+      extra: { url: "/api/google/webhook" },
+    }),
+  );
 
   return NextResponse.json({ ok: true });
 });
@@ -53,21 +104,15 @@ export const POST = withError("google/webhook", async (request) => {
 async function processWebhookAsync(
   decodedData: { emailAddress: string; historyId: number },
   logger: Logger,
+  emailAccount?: Awaited<ReturnType<typeof getWebhookEmailAccount>> | null,
 ) {
   try {
-    await processHistoryForUser(decodedData, {}, logger);
-  } catch (error) {
-    // Look up email account to get emailAccountId for error tracking
-    const emailAccount = await getWebhookEmailAccount(
-      { email: decodedData.emailAddress.toLowerCase() },
+    await processHistoryForUser(
+      decodedData,
+      { preloadedEmailAccount: emailAccount },
       logger,
-    ).catch((lookupError) => {
-      logger.error("Error getting email account for error handling", {
-        lookupError,
-      });
-      return null;
-    });
-
+    );
+  } catch (error) {
     await handleWebhookError(error, {
       email: decodedData.emailAddress,
       emailAccountId: emailAccount?.id || "unknown",

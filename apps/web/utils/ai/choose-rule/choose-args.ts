@@ -1,14 +1,14 @@
 import { z } from "zod";
 import type { EmailAccountWithAI } from "@/utils/llms/types";
 import type { ModelType } from "@/utils/llms/model";
-import { ActionType } from "@/generated/prisma/enums";
+import type { DraftReplyConfidence } from "@/generated/prisma/enums";
 import type { Action } from "@/generated/prisma/client";
 import {
   type RuleWithActions,
   isDefined,
   type ParsedMessage,
 } from "@/utils/types";
-import { fetchMessagesAndGenerateDraft } from "@/utils/reply-tracker/generate-draft";
+import { fetchMessagesAndGenerateDraftWithConfidenceThreshold } from "@/utils/reply-tracker/generate-draft";
 import { getEmailForLLM } from "@/utils/get-email-from-message";
 import {
   type ActionArgResponse,
@@ -16,8 +16,24 @@ import {
 } from "@/utils/ai/choose-rule/ai-choose-args";
 import type { Logger } from "@/utils/logger";
 import type { EmailProvider } from "@/utils/email/types";
+import type { DraftAttribution } from "@/utils/ai/reply/draft-attribution";
+import type { DraftContextMetadata } from "@/utils/ai/reply/draft-context-metadata";
+import { isDraftReplyActionType } from "@/utils/actions/draft-reply";
 
 const MODULE = "choose-args";
+
+export type EmailAccountForDrafting = EmailAccountWithAI & {
+  draftReplyConfidence: DraftReplyConfidence;
+};
+
+type DraftAttributionFields = {
+  draftModelProvider?: string | null;
+  draftModelName?: string | null;
+  draftPipelineVersion?: number | null;
+  draftContextMetadata?: DraftContextMetadata | null;
+};
+
+export type ActionWithDraftAttribution = Action & DraftAttributionFields;
 
 export async function getActionItemsWithAiArgs({
   message,
@@ -29,23 +45,26 @@ export async function getActionItemsWithAiArgs({
   isTest = false,
 }: {
   message: ParsedMessage;
-  emailAccount: EmailAccountWithAI;
+  emailAccount: EmailAccountForDrafting;
   selectedRule: RuleWithActions;
   client: EmailProvider;
   modelType: ModelType;
   logger: Logger;
   isTest?: boolean;
-}): Promise<Action[]> {
+}): Promise<ActionWithDraftAttribution[]> {
   const log = logger.with({ module: MODULE });
   // Draft content is handled via its own AI call
   // We provide a lot more context to the AI to draft the content
-  const draftEmailActions = selectedRule.actions.filter(
-    (action) => action.type === ActionType.DRAFT_EMAIL && !action.content,
+  const draftReplyActions = selectedRule.actions.filter(
+    (action) => isDraftReplyActionType(action.type) && !action.content,
   );
 
   let draft: string | null = null;
+  let draftConfidence: DraftReplyConfidence | null = null;
+  let draftAttribution: DraftAttribution | null = null;
+  let draftContextMetadata: DraftContextMetadata | null = null;
 
-  if (draftEmailActions.length) {
+  if (draftReplyActions.length) {
     try {
       log.info("Generating draft", {
         email: emailAccount.email,
@@ -53,17 +72,27 @@ export async function getActionItemsWithAiArgs({
         isTest,
       });
 
-      draft = await fetchMessagesAndGenerateDraft(
-        emailAccount,
-        message.threadId,
-        client,
-        isTest ? message : undefined,
-        logger,
-      );
+      const draftResult =
+        await fetchMessagesAndGenerateDraftWithConfidenceThreshold(
+          emailAccount,
+          message.threadId,
+          client,
+          isTest ? message : undefined,
+          logger,
+          emailAccount.draftReplyConfidence,
+          selectedRule.id,
+        );
+      draft = draftResult.draft;
+      draftConfidence = draftResult.confidence;
+      draftAttribution = draftResult.attribution;
+      draftContextMetadata = draftResult.draftContextMetadata ?? null;
 
       log.info("Draft generated", {
         email: emailAccount.email,
         threadId: message.threadId,
+        draftConfidence,
+        minimumConfidence: emailAccount.draftReplyConfidence,
+        drafted: !!draft,
       });
     } catch (error) {
       log.error("Failed to generate draft", {
@@ -78,9 +107,11 @@ export async function getActionItemsWithAiArgs({
 
   const parameters = extractActionsNeedingAiGeneration(selectedRule.actions);
 
-  if (parameters.length === 0 && !draft) return selectedRule.actions;
+  if (parameters.length === 0 && !draft) {
+    return filterIncompleteDraftActions(selectedRule.actions);
+  }
 
-  const result = await aiGenerateArgs({
+  const { args, attribution: aiArgsAttribution } = await aiGenerateArgs({
     email: getEmailForLLM(message),
     emailAccount,
     selectedRule,
@@ -89,27 +120,63 @@ export async function getActionItemsWithAiArgs({
     logger,
   });
 
-  return combineActionsWithAiArgs(selectedRule.actions, result, draft);
-}
+  const combinedActions = combineActionsWithAiArgs(
+    selectedRule.actions,
+    args,
+    draft,
+    draftAttribution,
+    aiArgsAttribution,
+    draftContextMetadata,
+  );
+  const filteredActions = filterIncompleteDraftActions(combinedActions);
 
+  if (filteredActions.length < combinedActions.length) {
+    log.info("Skipping draft action with no generated content", {
+      removedDraftActions: combinedActions.length - filteredActions.length,
+      draftConfidence,
+      minimumConfidence: emailAccount.draftReplyConfidence,
+    });
+  }
+
+  return filteredActions;
+}
 export function combineActionsWithAiArgs(
   actions: Action[],
   aiArgs: ActionArgResponse | undefined,
   draft: string | null = null,
-): Action[] {
-  if (!aiArgs && !draft) return actions;
+  draftAttribution: DraftAttribution | null = null,
+  aiArgsAttribution: DraftAttribution | null = null,
+  draftContextMetadata: DraftContextMetadata | null = null,
+): ActionWithDraftAttribution[] {
+  if (!aiArgs && !draft) return actions as ActionWithDraftAttribution[];
 
   return actions.map((action) => {
-    const updatedAction = { ...action };
+    const updatedAction: ActionWithDraftAttribution = { ...action };
 
     // Add draft content to DRAFT_EMAIL actions if available
-    if (draft && action.type === ActionType.DRAFT_EMAIL) {
+    if (draft && isDraftReplyActionType(action.type)) {
       updatedAction.content = draft;
+      updatedAction.draftModelProvider = draftAttribution?.provider ?? null;
+      updatedAction.draftModelName = draftAttribution?.modelName ?? null;
+      updatedAction.draftPipelineVersion =
+        draftAttribution?.pipelineVersion ?? null;
+      updatedAction.draftContextMetadata = draftContextMetadata;
     }
 
     // Process AI args if available
     const aiAction = aiArgs?.[`${action.type}-${action.id}`];
     if (!aiAction) return updatedAction;
+
+    if (
+      isDraftReplyActionType(action.type) &&
+      typeof action.content === "string" &&
+      aiAction.content
+    ) {
+      updatedAction.draftModelProvider = aiArgsAttribution?.provider ?? null;
+      updatedAction.draftModelName = aiArgsAttribution?.modelName ?? null;
+      updatedAction.draftPipelineVersion =
+        aiArgsAttribution?.pipelineVersion ?? null;
+    }
 
     // Merge variables for each field that has AI-generated content
     for (const [field, vars] of Object.entries(aiAction)) {
@@ -137,6 +204,15 @@ export function combineActionsWithAiArgs(
     }
 
     return updatedAction;
+  });
+}
+
+export function filterIncompleteDraftActions<T extends Action>(
+  actions: T[],
+): T[] {
+  return actions.filter((action) => {
+    if (!isDraftReplyActionType(action.type)) return true;
+    return !!action.content?.trim();
   });
 }
 
@@ -174,7 +250,7 @@ export function combineActionsWithAiArgs(
  *
  * Note: Only returns actions that have fields containing {{template variables}}
  */
-function extractActionsNeedingAiGeneration(actions: Action[]) {
+export function extractActionsNeedingAiGeneration(actions: Action[]) {
   return actions
     .map((action) => {
       const fields = getParameterFieldsForAction(action);
@@ -260,11 +336,17 @@ export function getParameterFieldsForAction(
           );
         });
 
-        const description = `Generate this template: ${template}${
-          field === "content"
-            ? "\nMake sure to maintain the exact formatting."
-            : ""
-        }`;
+        const variableList = aiPrompts
+          .map((prompt, index) => `- var${index + 1}: ${prompt}`)
+          .join("\n");
+
+        const description = `Fill in the variable(s) for this template. Return ONLY the value for each variable, not the surrounding template text.
+
+Variables to fill:
+${variableList}
+
+Full template for context:
+${template}`;
 
         fields[field] = z.object(schemaFields).describe(description);
       }

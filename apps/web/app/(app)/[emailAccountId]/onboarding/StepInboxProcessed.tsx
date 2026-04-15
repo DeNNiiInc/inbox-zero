@@ -1,25 +1,44 @@
-import { CheckCheckIcon } from "lucide-react";
-import { PageHeading, TypographyP } from "@/components/Typography";
-import { IconCircle } from "@/app/(app)/[emailAccountId]/onboarding/IconCircle";
-import { OnboardingWrapper } from "@/app/(app)/[emailAccountId]/onboarding/OnboardingWrapper";
-import { ContinueButton } from "@/app/(app)/[emailAccountId]/onboarding/ContinueButton";
-import { ONBOARDING_PROCESS_EMAILS_COUNT } from "@/utils/config";
-import { usePremium } from "@/components/PremiumAlert";
+"use client";
 
-export function StepInboxProcessed({ onNext }: { onNext: () => void }) {
+import { ArrowRightIcon } from "lucide-react";
+import { PageHeading, TypographyP } from "@/components/Typography";
+import { Button } from "@/components/ui/button";
+import { EmailsSortedIllustration } from "@/app/(app)/[emailAccountId]/onboarding/illustrations/EmailsSortedIllustration";
+import { InboxReadyIllustration } from "@/app/(app)/[emailAccountId]/onboarding/illustrations/InboxReadyIllustration";
+import {
+  ONBOARDING_FLOW_VARIANTS,
+  type OnboardingFlowVariant,
+} from "@/app/(app)/[emailAccountId]/onboarding/onboardingFlow";
+import { ONBOARDING_PROCESS_EMAILS_COUNT } from "@/utils/config";
+import { usePremium } from "@/hooks/usePremium";
+
+export function StepInboxProcessed({
+  flowVariant,
+  onNext,
+}: {
+  flowVariant: OnboardingFlowVariant;
+  onNext: () => void;
+}) {
   const { isPremium } = usePremium();
+  const isFastFlow = flowVariant === ONBOARDING_FLOW_VARIANTS.FAST_5;
 
   return (
-    <OnboardingWrapper>
-      <IconCircle size="lg" className="mx-auto">
-        <CheckCheckIcon className="size-6" />
-      </IconCircle>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4">
+      <div className="flex flex-col items-center text-center max-w-md">
+        <div className="mb-6 h-[240px] flex items-end justify-center">
+          {isFastFlow ? (
+            <EmailsSortedIllustration />
+          ) : (
+            <InboxReadyIllustration />
+          )}
+        </div>
 
-      <div className="text-center mt-4">
-        <PageHeading>Inbox Preview Ready</PageHeading>
-        <TypographyP className="mt-2 max-w-xl mx-auto">
-          We labeled your last {ONBOARDING_PROCESS_EMAILS_COUNT} emails and
-          drafted replies (nothing was archived).
+        <PageHeading className="mb-3">Inbox Preview Ready</PageHeading>
+
+        <TypographyP className="text-muted-foreground mb-8">
+          {isFastFlow
+            ? `We organized your last ${ONBOARDING_PROCESS_EMAILS_COUNT} emails into categories so you can preview how the inbox will look.`
+            : `We labeled your last ${ONBOARDING_PROCESS_EMAILS_COUNT} emails and drafted replies (nothing was archived).`}
           {!isPremium && (
             <>
               <br />
@@ -28,11 +47,14 @@ export function StepInboxProcessed({ onNext }: { onNext: () => void }) {
             </>
           )}
         </TypographyP>
-      </div>
 
-      <div className="flex justify-center mt-8">
-        <ContinueButton onClick={onNext} />
+        <div className="flex flex-col gap-2 w-full max-w-xs">
+          <Button className="w-full" onClick={onNext}>
+            Continue
+            <ArrowRightIcon className="size-4 ml-2" />
+          </Button>
+        </div>
       </div>
-    </OnboardingWrapper>
+    </div>
   );
 }

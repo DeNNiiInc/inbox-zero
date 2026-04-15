@@ -1,5 +1,9 @@
 import type { OutlookClient } from "@/utils/outlook/client";
 import { withOutlookRetry } from "@/utils/outlook/retry";
+import {
+  processThreadMessagesFallback,
+  runThreadMessageMutation,
+} from "@/utils/outlook/thread-helpers";
 import type { Logger } from "@/utils/logger";
 
 export async function markSpam(
@@ -13,32 +17,26 @@ export async function markSpam(
     // Escape single quotes in threadId for the filter
     const escapedThreadId = threadId.replace(/'/g, "''");
     const messages = await client
-      .api("/messages")
+      .getClient()
+      .api("/me/messages")
       .filter(`conversationId eq '${escapedThreadId}'`)
       .get();
 
-    // Move each message in the thread to the junk email folder
-    const movePromises = messages.value.map(async (message: { id: string }) => {
-      try {
-        return await withOutlookRetry(
+    await runThreadMessageMutation({
+      messageIds: messages.value.map((message: { id: string }) => message.id),
+      threadId,
+      logger,
+      messageHandler: (messageId) =>
+        withOutlookRetry(
           () =>
-            client.api(`/messages/${message.id}/move`).post({
+            client.getClient().api(`/me/messages/${messageId}/move`).post({
               destinationId: "junkemail",
             }),
           logger,
-        );
-      } catch (error) {
-        // Log the error but don't fail the entire operation
-        logger.warn("Failed to move message to spam", {
-          messageId: message.id,
-          threadId,
-          error,
-        });
-        return null;
-      }
+        ),
+      failureMessage: "Failed to move message to spam",
+      continueOnError: true,
     });
-
-    await Promise.allSettled(movePromises);
   } catch (error) {
     // If the filter fails, try a different approach
     logger.warn("Filter failed, trying alternative approach", {
@@ -47,56 +45,22 @@ export async function markSpam(
     });
 
     try {
-      // Try to get messages by conversationId using a different endpoint
-      const messages = await client
-        .api("/messages")
-        .select("id")
-        .get();
-
-      // Filter messages by conversationId manually
-      const threadMessages = messages.value.filter(
-        (message: { conversationId: string }) =>
-          message.conversationId === threadId,
-      );
-
-      if (threadMessages.length > 0) {
-        // Move each message in the thread to the junk email folder
-        const movePromises = threadMessages.map(
-          async (message: { id: string }) => {
-            try {
-              return await withOutlookRetry(
-                () =>
-                  client
-                    .api(`/messages/${message.id}/move`)
-                    .post({
-                      destinationId: "junkemail",
-                    }),
-                logger,
-              );
-            } catch (moveError) {
-              // Log the error but don't fail the entire operation
-              logger.warn("Failed to move message to spam", {
-                messageId: message.id,
-                threadId,
-                error:
-                  moveError instanceof Error ? moveError.message : moveError,
-              });
-              return null;
-            }
-          },
-        );
-
-        await Promise.allSettled(movePromises);
-      } else {
-        // If no messages found, try treating threadId as a messageId
-        await withOutlookRetry(
-          () =>
-            client.api(`/messages/${threadId}/move`).post({
-              destinationId: "junkemail",
-            }),
-          logger,
-        );
-      }
+      await processThreadMessagesFallback({
+        client,
+        threadId,
+        logger,
+        messageHandler: (messageId) =>
+          withOutlookRetry(
+            () =>
+              client
+                .getClient()
+                .api(`/me/messages/${messageId}/move`)
+                .post({ destinationId: "junkemail" }),
+            logger,
+          ),
+        noMessagesMessage:
+          "No messages found for conversationId, skipping spam move",
+      });
     } catch (directError) {
       logger.error("Failed to mark message as spam", {
         threadId,

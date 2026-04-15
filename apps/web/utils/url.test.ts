@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   getEmailUrl,
   getEmailUrlForMessage,
+  getEmailUrlForOptionalMessage,
+  getEmailSearchUrl,
   getGmailUrl,
   getGmailSearchUrl,
   getGmailBasicSearchUrl,
@@ -13,7 +15,7 @@ describe("getEmailUrl", () => {
     it("builds Gmail URL with email address", () => {
       const result = getEmailUrl("msg123", "user@gmail.com", "google");
       expect(result).toBe(
-        "https://mail.google.com/mail/u/user@gmail.com/#all/msg123",
+        "https://mail.google.com/mail/u/0/?authuser=user%40gmail.com/#all/msg123",
       );
     });
 
@@ -53,18 +55,22 @@ describe("getEmailUrl", () => {
     it("uses Gmail format when provider is undefined", () => {
       const result = getEmailUrl("msg123", "user@gmail.com");
       expect(result).toBe(
-        "https://mail.google.com/mail/u/user@gmail.com/#all/msg123",
+        "https://mail.google.com/mail/u/0/?authuser=user%40gmail.com/#all/msg123",
       );
     });
 
-    it("throws for unknown provider (bug: should fall back to default)", () => {
-      // NOTE: This documents a potential bug - unknown providers cause an error
-      // instead of falling back to the "default" config.
-      // The getProviderConfig function only falls back when provider is undefined,
-      // not when the provider key doesn't exist in PROVIDER_CONFIG.
-      expect(() =>
-        getEmailUrl("msg123", "user@gmail.com", "unknown"),
-      ).toThrow();
+    it("falls back to default for unknown provider", () => {
+      const result = getEmailUrl("msg123", "user@gmail.com", "unknown");
+      expect(result).toBe(
+        "https://mail.google.com/mail/u/0/?authuser=user%40gmail.com/#all/msg123",
+      );
+    });
+
+    it("falls back to default for empty provider", () => {
+      const result = getEmailUrl("msg123", "user@gmail.com", "");
+      expect(result).toBe(
+        "https://mail.google.com/mail/u/0/?authuser=user%40gmail.com/#all/msg123",
+      );
     });
   });
 });
@@ -84,15 +90,15 @@ describe("getEmailUrlForMessage", () => {
   });
 
   describe("Microsoft provider", () => {
-    it("uses threadId for Microsoft", () => {
+    it("uses messageId for Microsoft", () => {
       const result = getEmailUrlForMessage(
         "messageId123",
         "threadId456",
         "user@outlook.com",
         "microsoft",
       );
-      expect(result).toContain("threadId456");
-      expect(result).not.toContain("messageId123");
+      expect(result).toContain("messageId123");
+      expect(result).not.toContain("threadId456");
     });
   });
 
@@ -105,6 +111,39 @@ describe("getEmailUrlForMessage", () => {
       );
       expect(result).toContain("threadId456");
     });
+  });
+});
+
+describe("getEmailUrlForOptionalMessage", () => {
+  it("returns null for Microsoft when messageId is missing", () => {
+    const result = getEmailUrlForOptionalMessage({
+      threadId: "threadId456",
+      emailAddress: "user@outlook.com",
+      provider: "microsoft",
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it("falls back to threadId for default providers", () => {
+    const result = getEmailUrlForOptionalMessage({
+      threadId: "threadId456",
+      emailAddress: "user@example.com",
+    });
+
+    expect(result).toContain("threadId456");
+  });
+
+  it("uses messageId when available", () => {
+    const result = getEmailUrlForOptionalMessage({
+      messageId: "messageId123",
+      threadId: "threadId456",
+      emailAddress: "user@gmail.com",
+      provider: "google",
+    });
+
+    expect(result).toContain("messageId123");
+    expect(result).not.toContain("threadId456");
   });
 });
 
@@ -125,7 +164,7 @@ describe("getGmailSearchUrl", () => {
   it("builds advanced search URL with from parameter", () => {
     const result = getGmailSearchUrl("sender@example.com", "user@gmail.com");
     expect(result).toBe(
-      "https://mail.google.com/mail/u/user@gmail.com/#advanced-search/from=sender%40example.com",
+      "https://mail.google.com/mail/u/0/?authuser=user%40gmail.com/#advanced-search/from=sender%40example.com",
     );
   });
 
@@ -143,11 +182,57 @@ describe("getGmailSearchUrl", () => {
   });
 });
 
+describe("getEmailSearchUrl", () => {
+  it("builds Gmail sender search URL for Google provider", () => {
+    const result = getEmailSearchUrl(
+      "sender@example.com",
+      "user@gmail.com",
+      "google",
+    );
+    expect(result).toBe(
+      "https://mail.google.com/mail/u/0/?authuser=user%40gmail.com/#advanced-search/from=sender%40example.com",
+    );
+  });
+
+  it("builds Outlook sender search URL for Microsoft provider", () => {
+    const result = getEmailSearchUrl(
+      "sender@example.com",
+      "user@outlook.com",
+      "microsoft",
+    );
+    expect(result).toBe(
+      "https://outlook.live.com/mail/0/search/q/from%3Asender%40example.com",
+    );
+  });
+
+  it("falls back to default provider when provider is empty", () => {
+    const result = getEmailSearchUrl(
+      "sender@example.com",
+      "user@gmail.com",
+      "",
+    );
+    expect(result).toBe(
+      "https://mail.google.com/mail/u/0/?authuser=user%40gmail.com/#advanced-search/from=sender%40example.com",
+    );
+  });
+
+  it("falls back to default provider when provider is unknown", () => {
+    const result = getEmailSearchUrl(
+      "sender@example.com",
+      "user@gmail.com",
+      "unknown-provider",
+    );
+    expect(result).toBe(
+      "https://mail.google.com/mail/u/0/?authuser=user%40gmail.com/#advanced-search/from=sender%40example.com",
+    );
+  });
+});
+
 describe("getGmailBasicSearchUrl", () => {
   it("builds search URL with query", () => {
     const result = getGmailBasicSearchUrl("user@gmail.com", "is:unread");
     expect(result).toBe(
-      "https://mail.google.com/mail/u/user@gmail.com/#search/is%3Aunread",
+      "https://mail.google.com/mail/u/0/?authuser=user%40gmail.com/#search/is%3Aunread",
     );
   });
 
@@ -174,7 +259,7 @@ describe("getGmailFilterSettingsUrl", () => {
   it("builds filter settings URL with email address", () => {
     const result = getGmailFilterSettingsUrl("user@gmail.com");
     expect(result).toBe(
-      "https://mail.google.com/mail/u/user@gmail.com/#settings/filters",
+      "https://mail.google.com/mail/u/0/?authuser=user%40gmail.com/#settings/filters",
     );
   });
 

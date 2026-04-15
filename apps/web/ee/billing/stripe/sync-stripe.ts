@@ -4,8 +4,9 @@ import type { Logger } from "@/utils/logger";
 import { getStripe } from "@/ee/billing/stripe";
 import { getStripeSubscriptionTier } from "@/app/(app)/premium/config";
 import { handleLoopsEvents } from "@/ee/billing/stripe/loops-events";
-import { syncPremiumSeats } from "@/utils/premium/server";
+import { syncPremiumSeats } from "@/utils/premium/seats";
 import { ensureEmailAccountsWatched } from "@/utils/email/watch-manager";
+import { captureException } from "@/utils/error";
 
 export async function syncStripeDataToDb({
   customerId,
@@ -130,6 +131,15 @@ export async function syncStripeDataToDb({
         : null,
     };
 
+    if (currentPremium?.stripeSubscriptionStatus !== subscription.status) {
+      logger.info("Stripe subscription status changing", {
+        customerId,
+        previousStatus: currentPremium?.stripeSubscriptionStatus,
+        newStatus: subscription.status,
+        subscriptionId: subscription.id,
+      });
+    }
+
     const updatedPremium = await prisma.premium.upsert({
       where: { stripeCustomerId: customerId },
       update: subscriptionData,
@@ -176,6 +186,7 @@ export async function syncStripeDataToDb({
     });
   } catch (error) {
     logger.error("Error syncing Stripe data to DB", { customerId, error });
+    captureException(error, { extra: { customerId } });
     throw error;
   }
 }

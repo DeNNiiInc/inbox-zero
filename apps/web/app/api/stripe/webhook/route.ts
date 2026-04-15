@@ -5,10 +5,18 @@ import { getStripe } from "@/ee/billing/stripe";
 import { withError } from "@/utils/middleware";
 import type { Logger } from "@/utils/logger";
 import { syncStripeDataToDb } from "@/ee/billing/stripe/sync-stripe";
+import { getStripeTrialStartedProperties } from "@/ee/billing/stripe/posthog-events";
+import { syncAiGenerationOverageForUpcomingInvoice } from "@/ee/billing/stripe/ai-overage";
 import { env } from "@/env";
-import { trackStripeEvent } from "@/utils/posthog";
+import {
+  trackBillingTrialStarted,
+  trackStripeEvent,
+  trackSubscriptionTrialStarted,
+  trackTrialStarted,
+} from "@/utils/posthog";
 import prisma from "@/utils/prisma";
 import { completeReferralAndGrantReward } from "@/utils/referral/referral-tracking";
+import { captureException } from "@/utils/error";
 
 export const POST = withError("stripe/webhook", async (request) => {
   const logger = request.logger;
@@ -31,7 +39,24 @@ export const POST = withError("stripe/webhook", async (request) => {
     env.STRIPE_WEBHOOK_SECRET,
   );
 
-  after(() => processEvent(event, logger));
+  after(async () => {
+    try {
+      await processEvent(event, logger);
+      logger.info("Stripe webhook processed successfully", {
+        eventType: event.type,
+        eventId: event.id,
+      });
+    } catch (error) {
+      logger.error("Stripe webhook processing failed", {
+        eventType: event.type,
+        eventId: event.id,
+        error,
+      });
+      captureException(error, {
+        extra: { eventType: event.type, eventId: event.id },
+      });
+    }
+  });
 
   return NextResponse.json({ received: true });
 });
@@ -70,11 +95,34 @@ async function processEvent(event: Stripe.Event, logger: Logger) {
     throw new Error(`ID isn't string.\nEvent type: ${event.type}`);
   }
 
-  return await Promise.allSettled([
+  const syncResult = await Promise.allSettled([
     syncStripeDataToDb({ customerId, logger }),
-    trackEvent(customerId, event),
-    handleReferralCompletion(customerId, event, logger),
   ]);
+
+  const [stripeSync] = syncResult;
+
+  const email = await getCustomerEmail(customerId);
+
+  const tasks: Promise<unknown>[] = [
+    trackEvent(email, event),
+    trackBillingMilestones(email, event, customerId),
+    handleReferralCompletion(customerId, event, logger),
+  ];
+
+  if (stripeSync.status === "fulfilled") {
+    tasks.push(syncAiGenerationOverageForUpcomingInvoice({ event, logger }));
+  } else {
+    logger.error(
+      "Skipping AI overage sync because Stripe customer sync failed",
+      {
+        customerId,
+        eventType: event.type,
+        error: stripeSync.reason,
+      },
+    );
+  }
+
+  return await Promise.allSettled(tasks);
 }
 
 async function handleReferralCompletion(
@@ -123,16 +171,45 @@ async function handleReferralCompletion(
   }
 }
 
-async function trackEvent(customerId: string, event: Stripe.Event) {
-  const user = await prisma.premium.findUnique({
-    where: { stripeCustomerId: customerId },
-    select: { users: { select: { email: true } } },
-  });
-
-  return trackStripeEvent(user?.users[0]?.email ?? "Unknown", {
+async function trackEvent(email: string | undefined, event: Stripe.Event) {
+  return trackStripeEvent(email ?? "Unknown", {
     ...event.data.object,
     id: event.id,
     type: event.type,
     object: event.data.object, // for legacy
   });
+}
+
+async function trackBillingMilestones(
+  email: string | undefined,
+  event: Stripe.Event,
+  customerId: string,
+) {
+  const distinctId = email ?? customerId;
+
+  const tasks: Promise<unknown>[] = [];
+
+  const trialProperties = getStripeTrialStartedProperties(event);
+  if (trialProperties) {
+    tasks.push(trackBillingTrialStarted(distinctId, trialProperties));
+
+    if (event.type === "customer.subscription.created") {
+      tasks.push(trackTrialStarted(distinctId, trialProperties));
+    } else {
+      tasks.push(trackSubscriptionTrialStarted(distinctId, trialProperties));
+    }
+  }
+
+  if (tasks.length) {
+    await Promise.allSettled(tasks);
+  }
+}
+
+async function getCustomerEmail(customerId: string) {
+  const premium = await prisma.premium.findUnique({
+    where: { stripeCustomerId: customerId },
+    select: { users: { select: { email: true } } },
+  });
+
+  return premium?.users[0]?.email;
 }

@@ -11,14 +11,52 @@ const withMDX = nextMdx({
   },
 });
 
+const isDevelopment = process.env.NODE_ENV === "development";
+const isProductionBuild = process.env.NODE_ENV === "production";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  allowedDevOrigins: ["127.0.0.1"],
+  logging: {
+    browserToTerminal: true,
+  },
+  experimental:
+    isDevelopment || isProductionBuild
+      ? {
+          ...(isDevelopment
+            ? {
+                // This app has a large route graph. Avoid front-loading all
+                // route modules into memory at startup during local
+                // development.
+                preloadEntriesOnStart: false,
+              }
+            : {}),
+          ...(isProductionBuild
+            ? {
+                // Keep the static build from fanning out too many workers at
+                // once. This trades a bit of build time for lower peak RAM.
+                staticGenerationMaxConcurrency: 4,
+                staticGenerationMinPagesPerWorker: 100,
+              }
+            : {}),
+        }
+      : undefined,
+  onDemandEntries: isDevelopment
+    ? {
+        maxInactiveAge: 25 * 1000,
+        pagesBufferLength: 2,
+      }
+    : undefined,
   output: process.env.DOCKER_BUILD === "true" ? "standalone" : undefined,
   // Skip TypeScript checking during E2E CI builds to save memory
   typescript: {
     ignoreBuildErrors: process.env.SKIP_TYPE_CHECK === "true",
   },
-  serverExternalPackages: ["@sentry/nextjs", "@sentry/node"],
+  serverExternalPackages: [
+    "@sentry/nextjs",
+    "@sentry/node",
+    "mammoth",
+    "unpdf",
+  ],
   turbopack: {
     rules: {
       "*.svg": {
@@ -94,6 +132,11 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       {
+        source: "/roadmap",
+        destination: "https://go.getinboxzero.com/feature-requests",
+        permanent: true,
+      },
+      {
         source: "/feedback",
         destination: "https://go.getinboxzero.com/feedback",
         permanent: true,
@@ -124,6 +167,11 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       {
+        source: "/contact",
+        destination: "/support",
+        permanent: true,
+      },
+      {
         source: "/waitlist",
         destination: "https://go.getinboxzero.com/waitlist",
         permanent: true,
@@ -144,6 +192,21 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
       {
+        source: "/docs",
+        destination: "https://docs.getinboxzero.com",
+        permanent: true,
+      },
+      {
+        source: "/docs/:path*",
+        destination: "https://docs.getinboxzero.com/:path*",
+        permanent: true,
+      },
+      {
+        source: "/api-reference/cli",
+        destination: "https://docs.getinboxzero.com",
+        permanent: true,
+      },
+      {
         source: "/request-access",
         destination: "/early-access",
         permanent: true,
@@ -152,6 +215,11 @@ const nextConfig: NextConfig = {
         source: "/reply-tracker",
         destination: "/reply-zero",
         permanent: false,
+      },
+      {
+        source: "/new-senders",
+        destination: "/",
+        permanent: true,
       },
       {
         source: "/game",
@@ -192,54 +260,59 @@ const nextConfig: NextConfig = {
   },
   // Security headers: https://nextjs.org/docs/app/building-your-application/configuring/progressive-web-apps#8-securing-your-application
   async headers() {
+    const securityHeaders = [
+      {
+        key: "X-Frame-Options",
+        value: "DENY",
+      },
+      {
+        key: "X-XSS-Protection",
+        value: "1; mode=block",
+      },
+      {
+        key: "X-Content-Type-Options",
+        value: "nosniff",
+      },
+      {
+        key: "Referrer-Policy",
+        value: "strict-origin-when-cross-origin",
+      },
+      {
+        key: "Content-Security-Policy",
+        value: [
+          "default-src 'self'",
+          // Next.js needs these
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:",
+          // Needed for Tailwind/Shadcn
+          "style-src 'self' 'unsafe-inline' https:",
+          // Add this line to allow data: fonts
+          "font-src 'self' data: https:",
+          // For images including avatars and Mux thumbnails
+          "img-src 'self' data: https: blob: https://image.mux.com https://*.litix.io",
+          // For Mux video and audio content
+          "media-src 'self' blob: https://*.mux.com",
+          // If you use web workers or service workers
+          "worker-src 'self' blob:",
+          // For API calls, SWR, external services, and Mux
+          "connect-src 'self' https: wss: https://*.mux.com https://*.litix.io",
+          // iframes for Mux player
+          "frame-src 'self' https:",
+          // Prevent embedding in iframes
+          "frame-ancestors 'none'",
+        ].join("; "),
+      },
+      {
+        key: "Strict-Transport-Security",
+        value: "max-age=31536000",
+      },
+    ];
+
     return [
       {
-        source: "/(.*)",
+        // Apply all security headers + static CORS to non-auth routes
+        source: "/((?!api/auth).*)",
         headers: [
-          {
-            key: "X-Frame-Options",
-            value: "DENY",
-          },
-          {
-            key: "X-XSS-Protection",
-            value: "1; mode=block",
-          },
-          {
-            key: "X-Content-Type-Options",
-            value: "nosniff",
-          },
-          {
-            key: "Referrer-Policy",
-            value: "strict-origin-when-cross-origin",
-          },
-          {
-            key: "Content-Security-Policy",
-            value: [
-              "default-src 'self'",
-              // Next.js needs these
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:",
-              // Needed for Tailwind/Shadcn
-              "style-src 'self' 'unsafe-inline' https:",
-              // Add this line to allow data: fonts
-              "font-src 'self' data: https:",
-              // For images including avatars and Mux thumbnails
-              "img-src 'self' data: https: blob: https://image.mux.com https://*.litix.io",
-              // For Mux video and audio content
-              "media-src 'self' blob: https://*.mux.com",
-              // If you use web workers or service workers
-              "worker-src 'self' blob:",
-              // For API calls, SWR, external services, and Mux
-              "connect-src 'self' https: wss: https://*.mux.com https://*.litix.io",
-              // iframes for Mux player
-              "frame-src 'self' https:",
-              // Prevent embedding in iframes
-              "frame-ancestors 'none'",
-            ].join("; "),
-          },
-          {
-            key: "Strict-Transport-Security",
-            value: "max-age=31536000",
-          },
+          ...securityHeaders,
           {
             key: "Access-Control-Allow-Origin",
             value: env.NEXT_PUBLIC_BASE_URL,
@@ -249,6 +322,11 @@ const nextConfig: NextConfig = {
             value: "GET, POST, PUT, DELETE, OPTIONS",
           },
         ],
+      },
+      {
+        // Auth routes: security headers only, CORS handled by better-auth based on trustedOrigins
+        source: "/api/auth/:path*",
+        headers: securityHeaders,
       },
       {
         source: "/sw.js",

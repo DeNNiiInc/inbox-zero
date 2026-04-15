@@ -1,5 +1,5 @@
 import type { MailFolder } from "@microsoft/microsoft-graph-types";
-import type { OutlookClient } from "./client";
+import type { OutlookClient } from "./client-types";
 import type { Logger } from "@/utils/logger";
 import { withOutlookRetry } from "@/utils/outlook/retry";
 
@@ -32,7 +32,8 @@ export async function getOutlookRootFolders(
   const response: { value: MailFolder[] } = await withOutlookRetry(
     () =>
       client
-        .api("/mailFolders")
+        .getClient()
+        .api("/me/mailFolders")
         .select(fields)
         .top(999)
         .expand(
@@ -54,7 +55,8 @@ export async function getOutlookChildFolders(
   const response: { value: MailFolder[] } = await withOutlookRetry(
     () =>
       client
-        .api(`/mailFolders/${folderId}/childFolders`)
+        .getClient()
+        .api(`/me/mailFolders/${folderId}/childFolders`)
         .select(fields)
         .top(999)
         .expand(
@@ -76,7 +78,8 @@ async function findOutlookFolderByName(
     const response: { value: MailFolder[] } = await withOutlookRetry(
       () =>
         client
-          .api("/mailFolders")
+          .getClient()
+          .api("/me/mailFolders")
           .filter(`displayName eq '${folderName.replace(/'/g, "''")}'`)
           .select("id,displayName")
           .top(1)
@@ -180,7 +183,7 @@ export async function getOrCreateOutlookFolderIdByName(
   try {
     const response = await withOutlookRetry(
       () =>
-        client.api("/mailFolders").post({
+        client.getClient().api("/me/mailFolders").post({
           displayName: folderName,
         }),
       logger,

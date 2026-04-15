@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import prisma from "@/utils/__mocks__/prisma";
 import { cleanupStaleDrafts } from "./cleanup";
-import { createScopedLogger } from "@/utils/logger";
 import { createMockEmailProvider } from "@/__tests__/mocks/email-provider.mock";
 import { subDays } from "date-fns/subDays";
 
@@ -12,17 +11,18 @@ vi.mock("./labels", () => ({
 }));
 
 import { hasFollowUpLabel } from "./labels";
+import { createTestLogger } from "@/__tests__/helpers";
 
 const mockHasFollowUpLabel = vi.mocked(hasFollowUpLabel);
 
-const logger = createScopedLogger("test");
+const logger = createTestLogger();
 
 describe("cleanupStaleDrafts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("cleans up stale drafts when found", async () => {
+  it("cleans up stale drafts when found and tracked in database", async () => {
     const staleDate = subDays(new Date(), 10);
     const mockProvider = createMockEmailProvider({
       getDrafts: vi.fn().mockResolvedValue([
@@ -33,7 +33,12 @@ describe("cleanupStaleDrafts", () => {
     });
 
     prisma.threadTracker.findMany.mockResolvedValue([
-      { id: "tracker-1", threadId: "thread-1", followUpAppliedAt: staleDate },
+      {
+        id: "tracker-1",
+        threadId: "thread-1",
+        followUpAppliedAt: staleDate,
+        followUpDraftId: "draft-1",
+      },
     ] as any);
 
     mockHasFollowUpLabel.mockResolvedValue(true);
@@ -64,7 +69,12 @@ describe("cleanupStaleDrafts", () => {
     });
 
     prisma.threadTracker.findMany.mockResolvedValue([
-      { id: "tracker-1", threadId: "thread-1", followUpAppliedAt: staleDate },
+      {
+        id: "tracker-1",
+        threadId: "thread-1",
+        followUpAppliedAt: staleDate,
+        followUpDraftId: "draft-1",
+      },
     ] as any);
 
     mockHasFollowUpLabel.mockResolvedValue(false);
@@ -76,5 +86,81 @@ describe("cleanupStaleDrafts", () => {
     });
 
     expect(mockProvider.deleteDraft).not.toHaveBeenCalled();
+  });
+
+  it("does not delete drafts not tracked in database (user-created)", async () => {
+    const staleDate = subDays(new Date(), 10);
+    const mockProvider = createMockEmailProvider({
+      getDrafts: vi.fn().mockResolvedValue([
+        { id: "user-draft", threadId: "thread-1" },
+        { id: "ai-draft", threadId: "thread-1" },
+      ]),
+      deleteDraft: vi.fn().mockResolvedValue(undefined),
+    });
+
+    prisma.threadTracker.findMany.mockResolvedValue([
+      {
+        id: "tracker-1",
+        threadId: "thread-1",
+        followUpAppliedAt: staleDate,
+        followUpDraftId: "ai-draft",
+      },
+    ] as any);
+
+    mockHasFollowUpLabel.mockResolvedValue(true);
+
+    await cleanupStaleDrafts({
+      emailAccountId: "account-1",
+      provider: mockProvider,
+      logger,
+    });
+
+    expect(mockProvider.deleteDraft).not.toHaveBeenCalledWith("user-draft");
+    expect(mockProvider.deleteDraft).toHaveBeenCalledWith("ai-draft");
+  });
+
+  it("does not delete any drafts when none are tracked in database", async () => {
+    const staleDate = subDays(new Date(), 10);
+    const mockProvider = createMockEmailProvider({
+      getDrafts: vi
+        .fn()
+        .mockResolvedValue([{ id: "user-draft", threadId: "thread-1" }]),
+      deleteDraft: vi.fn().mockResolvedValue(undefined),
+    });
+
+    prisma.threadTracker.findMany.mockResolvedValue([
+      {
+        id: "tracker-1",
+        threadId: "thread-1",
+        followUpAppliedAt: staleDate,
+        followUpDraftId: null,
+      },
+    ] as any);
+
+    mockHasFollowUpLabel.mockResolvedValue(true);
+
+    await cleanupStaleDrafts({
+      emailAccountId: "account-1",
+      provider: mockProvider,
+      logger,
+    });
+
+    expect(mockProvider.deleteDraft).not.toHaveBeenCalled();
+  });
+
+  it("returns early when no stale trackers found", async () => {
+    const mockProvider = createMockEmailProvider({
+      getDrafts: vi.fn(),
+    });
+
+    prisma.threadTracker.findMany.mockResolvedValue([]);
+
+    await cleanupStaleDrafts({
+      emailAccountId: "account-1",
+      provider: mockProvider,
+      logger,
+    });
+
+    expect(mockProvider.getDrafts).not.toHaveBeenCalled();
   });
 });

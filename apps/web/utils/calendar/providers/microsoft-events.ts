@@ -8,10 +8,9 @@ import type { Logger } from "@/utils/logger";
 
 export interface MicrosoftCalendarConnectionParams {
   accessToken: string | null;
-  refreshToken: string | null;
-  expiresAt: number | null;
   emailAccountId: string;
-  mailboxAddress?: string; // For shared mailboxes
+  expiresAt: number | null;
+  refreshToken: string | null;
 }
 
 type MicrosoftEvent = {
@@ -48,13 +47,6 @@ export class MicrosoftCalendarEventProvider implements CalendarEventProvider {
     });
   }
 
-  private getCalendarApiPath(): string {
-    const mailboxAddress = this.connection.mailboxAddress;
-    return mailboxAddress && mailboxAddress !== "me"
-      ? `/users/${encodeURIComponent(mailboxAddress)}/calendar`
-      : "/me/calendar";
-  }
-
   async fetchEventsWithAttendee({
     attendeeEmail,
     timeMin,
@@ -70,7 +62,7 @@ export class MicrosoftCalendarEventProvider implements CalendarEventProvider {
 
     // Use calendarView endpoint which correctly returns events overlapping the time range
     const response = await client
-      .api(`${this.getCalendarApiPath()}/calendarView`)
+      .api("/me/calendar/calendarView")
       .query({
         startDateTime: timeMin.toISOString(),
         endDateTime: timeMax.toISOString(),
@@ -111,7 +103,7 @@ export class MicrosoftCalendarEventProvider implements CalendarEventProvider {
 
     // Use calendarView endpoint which correctly returns events overlapping the time range
     const response = await client
-      .api(`${this.getCalendarApiPath()}/calendarView`)
+      .api("/me/calendar/calendarView")
       .query({
         startDateTime: timeMin.toISOString(),
         endDateTime: effectiveTimeMax.toISOString(),

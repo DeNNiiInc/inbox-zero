@@ -5,14 +5,22 @@ import { toast } from "sonner";
 import { useAction } from "next-safe-action/hooks";
 import type { PostHog } from "posthog-js/react";
 import { onAutoArchive, onDeleteFilter } from "@/utils/actions/client";
-import { setNewsletterStatusAction } from "@/utils/actions/unsubscriber";
+import {
+  setNewsletterStatusAction,
+  unsubscribeSenderAction,
+} from "@/utils/actions/unsubscriber";
 import { decrementUnsubscribeCreditAction } from "@/utils/actions/premium";
 import { NewsletterStatus } from "@/generated/prisma/enums";
-import { cleanUnsubscribeLink } from "@/utils/parse/parseHtml.client";
 import { captureException } from "@/utils/error";
-import { addToArchiveSenderQueue } from "@/store/archive-sender-queue";
+import {
+  addToArchiveSenderThreadQueue,
+  useArchiveSenderQueueActions,
+} from "@/store/archive-sender-queue";
 import { deleteEmails } from "@/store/archive-queue";
-import type { Row } from "@/app/(app)/[emailAccountId]/bulk-unsubscribe/types";
+import type {
+  NewsletterFilterType,
+  Row,
+} from "@/app/(app)/[emailAccountId]/bulk-unsubscribe/types";
 import type { GetThreadsResponse } from "@/app/api/threads/basic/route";
 import { isDefined } from "@/utils/types";
 import { fetchWithAccount } from "@/utils/fetch";
@@ -21,20 +29,19 @@ import {
   bulkArchiveAction,
   bulkTrashAction,
 } from "@/utils/actions/mail-bulk-action";
-
-export type NewsletterFilterType =
-  | "all"
-  | "unhandled"
-  | "unsubscribed"
-  | "autoArchived"
-  | "approved";
+import {
+  getHttpUnsubscribeLink,
+  getUserFacingUnsubscribeLink,
+} from "@/utils/parse/unsubscribe";
 
 // Shared type for SWR mutate function
 type MutateFn = (
   // biome-ignore lint/suspicious/noExplicitAny: SWR mutate signature
   data?: any,
   opts?: { revalidate?: boolean },
-) => Promise<void>;
+) => Promise<unknown>;
+
+type QueueArchiveSendersFn = (params: { senders: string[] }) => Promise<number>;
 
 function pluralize(count: number, singular: string): string {
   return count === 1 ? singular : `${singular}s`;
@@ -75,6 +82,7 @@ async function executeBulkOperation<T extends Row>({
   onDeselectItem,
   processItem,
   newStatus,
+  getNewStatus,
   loadingMessage,
   successMessage,
   errorMessage,
@@ -86,6 +94,7 @@ async function executeBulkOperation<T extends Row>({
   onDeselectItem?: (id: string) => void;
   processItem: (item: T) => Promise<void>;
   newStatus: NewsletterStatus | null;
+  getNewStatus?: (item: T) => NewsletterStatus | null;
   loadingMessage: string;
   successMessage: string;
   errorMessage: string;
@@ -100,7 +109,8 @@ async function executeBulkOperation<T extends Row>({
   let completed = 0;
   const failures: Error[] = [];
 
-  const updateItemOptimistically = (itemName: string) => {
+  const updateItemOptimistically = (item: T) => {
+    const optimisticStatus = getNewStatus ? getNewStatus(item) : newStatus;
     mutate(
       // biome-ignore lint/suspicious/noExplicitAny: SWR data structure
       (currentData: any) => {
@@ -110,7 +120,7 @@ async function executeBulkOperation<T extends Row>({
           newsletters: currentData.newsletters
             // biome-ignore lint/suspicious/noExplicitAny: newsletter type
             .map((n: any) =>
-              n.name === itemName ? { ...n, status: newStatus } : n,
+              n.name === item.name ? { ...n, status: optimisticStatus } : n,
             )
             // biome-ignore lint/suspicious/noExplicitAny: newsletter type
             .filter((n: any) => itemMatchesFilter(n.status, filter)),
@@ -122,7 +132,7 @@ async function executeBulkOperation<T extends Row>({
 
   for (const item of items) {
     onDeselectItem?.(item.name);
-    updateItemOptimistically(item.name);
+    updateItemOptimistically(item);
 
     try {
       await processItem(item);
@@ -168,26 +178,69 @@ async function executeBulkOperation<T extends Row>({
 
 async function unsubscribeAndArchive({
   newsletterEmail,
+  unsubscribeLink,
   mutate,
   refetchPremium,
   emailAccountId,
+  queueArchiveSenders,
 }: {
   newsletterEmail: string;
+  unsubscribeLink?: string | null;
   mutate: () => Promise<void>;
   refetchPremium: () => Promise<UserResponse | null | undefined>;
   emailAccountId: string;
+  queueArchiveSenders: QueueArchiveSendersFn;
 }) {
-  await setNewsletterStatusAction(emailAccountId, {
+  const unsubscribed = await performAutomaticUnsubscribe({
+    emailAccountId,
     newsletterEmail,
-    status: NewsletterStatus.UNSUBSCRIBED,
+    unsubscribeLink,
   });
+  if (!unsubscribed) return false;
+
   await mutate();
   await decrementUnsubscribeCreditAction();
   await refetchPremium();
-  await addToArchiveSenderQueue({
-    sender: newsletterEmail,
+  await queueArchiveSenders({ senders: [newsletterEmail] });
+
+  return true;
+}
+
+async function blockSender({
+  sender,
+  emailAccountId,
+  labelId,
+  labelName,
+  queueArchiveSenders,
+}: {
+  sender: string;
+  emailAccountId: string;
+  labelId?: string;
+  labelName?: string;
+  queueArchiveSenders: QueueArchiveSendersFn;
+}) {
+  await onAutoArchive({
     emailAccountId,
+    from: sender,
+    gmailLabelId: labelId,
+    labelName,
   });
+  await setNewsletterStatusAction(emailAccountId, {
+    newsletterEmail: sender,
+    status: NewsletterStatus.AUTO_ARCHIVED,
+  });
+  await decrementUnsubscribeCreditAction();
+
+  if (labelId) {
+    await addToArchiveSenderThreadQueue({
+      sender,
+      labelId,
+      emailAccountId,
+    });
+    return;
+  }
+
+  await queueArchiveSenders({ senders: [sender] });
 }
 
 export function useUnsubscribe<T extends Row>({
@@ -206,6 +259,13 @@ export function useUnsubscribe<T extends Row>({
   refetchPremium: () => Promise<UserResponse | null | undefined>;
 }) {
   const [unsubscribeLoading, setUnsubscribeLoading] = useState(false);
+  const { queueArchiveSenders } = useArchiveSenderQueueActions(emailAccountId);
+  const automaticUnsubscribeLink = getAutomaticUnsubscribeLink(
+    item.unsubscribeLink,
+  );
+  const userFacingUnsubscribeLink = getManualUnsubscribeLink(
+    item.unsubscribeLink,
+  );
 
   const onUnsubscribe = useCallback(async () => {
     if (!hasUnsubscribeAccess) return;
@@ -222,34 +282,56 @@ export function useUnsubscribe<T extends Row>({
         });
         await mutate();
       } else {
-        await unsubscribeAndArchive({
+        if (!userFacingUnsubscribeLink) {
+          await blockSender({
+            sender: item.name,
+            emailAccountId,
+            queueArchiveSenders,
+          });
+          await mutate();
+          await refetchPremium();
+          return;
+        }
+
+        if (!automaticUnsubscribeLink) return;
+
+        const unsubscribed = await unsubscribeAndArchive({
           newsletterEmail: item.name,
+          unsubscribeLink: item.unsubscribeLink,
           mutate,
           refetchPremium,
           emailAccountId,
+          queueArchiveSenders,
         });
+        if (!unsubscribed) {
+          toast.error(`Could not automatically unsubscribe from ${item.name}`);
+        }
       }
     } catch (error) {
       captureException(error);
+    } finally {
+      setUnsubscribeLoading(false);
     }
-
-    setUnsubscribeLoading(false);
   }, [
     hasUnsubscribeAccess,
     item.name,
     item.status,
+    item.unsubscribeLink,
+    automaticUnsubscribeLink,
     mutate,
     refetchPremium,
     posthog,
     emailAccountId,
+    userFacingUnsubscribeLink,
+    queueArchiveSenders,
   ]);
 
   return {
     unsubscribeLoading,
     onUnsubscribe,
     unsubscribeLink:
-      hasUnsubscribeAccess && item.unsubscribeLink
-        ? cleanUnsubscribeLink(item.unsubscribeLink) || "#"
+      hasUnsubscribeAccess && userFacingUnsubscribeLink
+        ? userFacingUnsubscribeLink
         : "#",
   };
 }
@@ -271,6 +353,8 @@ export function useBulkUnsubscribe<T extends Row>({
   onDeselectItem?: (id: string) => void;
   filter: NewsletterFilterType;
 }) {
+  const { queueArchiveSenders } = useArchiveSenderQueueActions(emailAccountId);
+
   const onBulkUnsubscribe = useCallback(
     async (items: T[]) => {
       if (!hasUnsubscribeAccess) return;
@@ -282,21 +366,39 @@ export function useBulkUnsubscribe<T extends Row>({
         filter,
         onDeselectItem,
         newStatus: NewsletterStatus.UNSUBSCRIBED,
+        getNewStatus: (item) =>
+          getAutomaticUnsubscribeLink(item.unsubscribeLink)
+            ? NewsletterStatus.UNSUBSCRIBED
+            : NewsletterStatus.AUTO_ARCHIVED,
         loadingMessage: "Unsubscribing from",
         successMessage: "unsubscribed",
         errorMessage: "Failed to unsubscribe from",
         processItem: async (item) => {
-          await setNewsletterStatusAction(emailAccountId, {
-            newsletterEmail: item.name,
-            status: NewsletterStatus.UNSUBSCRIBED,
-          });
-          await decrementUnsubscribeCreditAction();
-          await addToArchiveSenderQueue({
-            sender: item.name,
+          if (!getAutomaticUnsubscribeLink(item.unsubscribeLink)) {
+            await blockSender({
+              sender: item.name,
+              emailAccountId,
+              queueArchiveSenders,
+            });
+            return;
+          }
+
+          const unsubscribed = await performAutomaticUnsubscribe({
             emailAccountId,
+            newsletterEmail: item.name,
+            unsubscribeLink: item.unsubscribeLink,
           });
+          if (!unsubscribed) {
+            throw new Error("Automatic unsubscribe did not succeed");
+          }
+
+          await decrementUnsubscribeCreditAction();
+          await queueArchiveSenders({ senders: [item.name] });
         },
-        onComplete: refetchPremium,
+        onComplete: async () => {
+          await mutate();
+          await refetchPremium();
+        },
       });
     },
     [
@@ -307,6 +409,7 @@ export function useBulkUnsubscribe<T extends Row>({
       emailAccountId,
       onDeselectItem,
       filter,
+      queueArchiveSenders,
     ],
   );
 
@@ -320,6 +423,7 @@ async function autoArchive({
   mutate,
   refetchPremium,
   emailAccountId,
+  queueArchiveSenders,
 }: {
   name: string;
   labelId: string | undefined;
@@ -327,25 +431,17 @@ async function autoArchive({
   mutate: () => Promise<void>;
   refetchPremium: () => Promise<UserResponse | null | undefined>;
   emailAccountId: string;
+  queueArchiveSenders: QueueArchiveSendersFn;
 }) {
-  await onAutoArchive({
+  await blockSender({
+    sender: name,
     emailAccountId,
-    from: name,
-    gmailLabelId: labelId,
-    labelName: labelName,
-  });
-  await setNewsletterStatusAction(emailAccountId, {
-    newsletterEmail: name,
-    status: NewsletterStatus.AUTO_ARCHIVED,
+    labelId,
+    labelName,
+    queueArchiveSenders,
   });
   await mutate();
-  await decrementUnsubscribeCreditAction();
   await refetchPremium();
-  await addToArchiveSenderQueue({
-    sender: name,
-    labelId,
-    emailAccountId,
-  });
 }
 
 export function useAutoArchive<T extends Row>({
@@ -364,6 +460,7 @@ export function useAutoArchive<T extends Row>({
   emailAccountId: string;
 }) {
   const [autoArchiveLoading, setAutoArchiveLoading] = useState(false);
+  const { queueArchiveSenders } = useArchiveSenderQueueActions(emailAccountId);
 
   const onAutoArchiveClick = useCallback(async () => {
     if (!hasUnsubscribeAccess) return;
@@ -377,6 +474,7 @@ export function useAutoArchive<T extends Row>({
       mutate,
       refetchPremium,
       emailAccountId,
+      queueArchiveSenders,
     });
 
     posthog.capture("Clicked Auto Archive");
@@ -389,6 +487,7 @@ export function useAutoArchive<T extends Row>({
     hasUnsubscribeAccess,
     posthog,
     emailAccountId,
+    queueArchiveSenders,
   ]);
 
   const onDisableAutoArchive = useCallback(async () => {
@@ -422,11 +521,19 @@ export function useAutoArchive<T extends Row>({
         mutate,
         refetchPremium,
         emailAccountId,
+        queueArchiveSenders,
       });
 
       setAutoArchiveLoading(false);
     },
-    [item.name, mutate, refetchPremium, hasUnsubscribeAccess, emailAccountId],
+    [
+      item.name,
+      mutate,
+      refetchPremium,
+      hasUnsubscribeAccess,
+      emailAccountId,
+      queueArchiveSenders,
+    ],
   );
 
   return {
@@ -452,6 +559,8 @@ export function useBulkAutoArchive<T extends Row>({
   onDeselectItem?: (id: string) => void;
   filter: NewsletterFilterType;
 }) {
+  const { queueArchiveSenders } = useArchiveSenderQueueActions(emailAccountId);
+
   const onBulkAutoArchive = useCallback(
     async (items: T[]) => {
       if (!hasUnsubscribeAccess) return;
@@ -462,9 +571,9 @@ export function useBulkAutoArchive<T extends Row>({
         filter,
         onDeselectItem,
         newStatus: NewsletterStatus.AUTO_ARCHIVED,
-        loadingMessage: "Setting skip inbox for",
-        successMessage: "set to skip inbox",
-        errorMessage: "Failed to set skip inbox for",
+        loadingMessage: "Setting auto archive for",
+        successMessage: "set to auto archive",
+        errorMessage: "Failed to set auto archive for",
         processItem: async (item) => {
           await onAutoArchive({
             emailAccountId,
@@ -477,11 +586,7 @@ export function useBulkAutoArchive<T extends Row>({
             status: NewsletterStatus.AUTO_ARCHIVED,
           });
           await decrementUnsubscribeCreditAction();
-          await addToArchiveSenderQueue({
-            sender: item.name,
-            labelId: undefined,
-            emailAccountId,
-          });
+          await queueArchiveSenders({ senders: [item.name] });
         },
         onComplete: refetchPremium,
       });
@@ -493,6 +598,7 @@ export function useBulkAutoArchive<T extends Row>({
       emailAccountId,
       onDeselectItem,
       filter,
+      queueArchiveSenders,
     ],
   );
 
@@ -651,36 +757,41 @@ export function useBulkApprove<T extends Row>({
 }
 
 export function useBulkArchive<T extends Row>({
-  mutate,
   posthog,
   emailAccountId,
+  mutate,
 }: {
-  mutate: () => Promise<void>;
   posthog: PostHog;
   emailAccountId: string;
+  mutate?: MutateFn;
 }) {
   const { executeAsync: executeBulkArchive, isExecuting } = useAction(
     bulkArchiveAction.bind(null, emailAccountId),
-    {
-      onSuccess: () => {
-        mutate();
-      },
-    },
   );
 
   const onBulkArchive = (items: T[]) => {
     posthog.capture("Clicked Bulk Archive");
     const promise = executeBulkArchive({
       froms: items.map((item) => item.name),
+    }).then(async (result) => {
+      if (result?.serverError) {
+        throw new Error(result.serverError);
+      }
+
+      await mutate?.(undefined, { revalidate: true });
+      return result;
     });
 
     const displayNames = formatSenderNames(items);
 
     toast.promise(promise, {
       loading: `Archiving emails from ${displayNames}...`,
-      success: `Archived emails from ${displayNames}`,
+      success: () => `Archived emails from ${displayNames}`,
       error: (error) =>
-        error?.error?.serverError || "There was an error archiving the emails",
+        error instanceof Error
+          ? error.message
+          : error?.error?.serverError ||
+            "There was an error archiving the emails",
     });
   };
 
@@ -767,7 +878,7 @@ export function useBulkDelete<T extends Row>({
   posthog,
   emailAccountId,
 }: {
-  mutate: () => Promise<void>;
+  mutate: () => Promise<unknown>;
   posthog: PostHog;
   emailAccountId: string;
 }) {
@@ -820,75 +931,107 @@ export function useBulkUnsubscribeShortcuts<T extends Row>({
   emailAccountId: string;
   userEmail: string;
 }) {
+  const { queueArchiveSenders } = useArchiveSenderQueueActions(emailAccountId);
+
   // perform actions using keyboard shortcuts
   // TODO make this available to command-K dialog too
-  // TODO limit the copy-paste. same logic appears twice in this file
   useEffect(() => {
     const down = async (e: KeyboardEvent) => {
-      const item = selectedRow;
-      if (!item) return;
+      try {
+        const item = selectedRow;
+        if (!item) return;
 
-      // to prevent when typing in an input such as Crisp support
-      if (document?.activeElement?.tagName !== "BODY") return;
+        // to prevent when typing in an input such as Crisp support
+        if (document?.activeElement?.tagName !== "BODY") return;
 
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        const index = newsletters?.findIndex((n) => n.name === item.name);
-        if (index === undefined) return;
-        const nextItem =
-          newsletters?.[index + (e.key === "ArrowDown" ? 1 : -1)];
-        if (!nextItem) return;
-        setSelectedRow(nextItem);
-        return;
-      }
-      if (e.key === "Enter") {
-        // open modal
-        e.preventDefault();
-        onOpenNewsletter(item);
-        return;
-      }
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          const index = newsletters?.findIndex((n) => n.name === item.name);
+          if (index === undefined) return;
+          const nextItem =
+            newsletters?.[index + (e.key === "ArrowDown" ? 1 : -1)];
+          if (!nextItem) return;
+          setSelectedRow(nextItem);
+          return;
+        }
+        if (e.key === "Enter") {
+          // open modal
+          e.preventDefault();
+          onOpenNewsletter(item);
+          return;
+        }
 
-      if (!hasUnsubscribeAccess) return;
+        if (!hasUnsubscribeAccess) return;
 
-      if (e.key === "e") {
-        // auto archive
-        e.preventDefault();
-        onAutoArchive({
-          emailAccountId,
-          from: item.name,
-        });
-        await setNewsletterStatusAction(emailAccountId, {
-          newsletterEmail: item.name,
-          status: NewsletterStatus.AUTO_ARCHIVED,
-        });
-        await mutate();
-        await decrementUnsubscribeCreditAction();
-        await refetchPremium();
-        return;
-      }
-      if (e.key === "u") {
-        // unsubscribe
-        e.preventDefault();
-        if (!item.unsubscribeLink) return;
-        window.open(cleanUnsubscribeLink(item.unsubscribeLink), "_blank");
-        await setNewsletterStatusAction(emailAccountId, {
-          newsletterEmail: item.name,
-          status: NewsletterStatus.UNSUBSCRIBED,
-        });
-        await mutate();
-        await decrementUnsubscribeCreditAction();
-        await refetchPremium();
-        return;
-      }
-      if (e.key === "a") {
-        // approve
-        e.preventDefault();
-        await setNewsletterStatusAction(emailAccountId, {
-          newsletterEmail: item.name,
-          status: NewsletterStatus.APPROVED,
-        });
-        await mutate();
-        return;
+        if (e.key === "e") {
+          // auto archive
+          e.preventDefault();
+          onAutoArchive({
+            emailAccountId,
+            from: item.name,
+          });
+          await setNewsletterStatusAction(emailAccountId, {
+            newsletterEmail: item.name,
+            status: NewsletterStatus.AUTO_ARCHIVED,
+          });
+          await mutate();
+          await decrementUnsubscribeCreditAction();
+          await refetchPremium();
+          return;
+        }
+        if (e.key === "u") {
+          // unsubscribe
+          e.preventDefault();
+          const automaticUnsubscribeLink = getAutomaticUnsubscribeLink(
+            item.unsubscribeLink,
+          );
+          const userFacingUnsubscribeLink = getManualUnsubscribeLink(
+            item.unsubscribeLink,
+          );
+
+          if (!userFacingUnsubscribeLink) {
+            await blockSender({
+              sender: item.name,
+              emailAccountId,
+              queueArchiveSenders,
+            });
+            await mutate();
+            await refetchPremium();
+            return;
+          }
+
+          if (!automaticUnsubscribeLink) {
+            window.open(
+              userFacingUnsubscribeLink,
+              "_blank",
+              "noopener,noreferrer",
+            );
+            return;
+          }
+
+          const unsubscribed = await unsubscribeAndArchive({
+            newsletterEmail: item.name,
+            unsubscribeLink: item.unsubscribeLink,
+            mutate,
+            refetchPremium,
+            emailAccountId,
+            queueArchiveSenders,
+          });
+          if (!unsubscribed) return;
+          return;
+        }
+        if (e.key === "a") {
+          // approve
+          e.preventDefault();
+          await setNewsletterStatusAction(emailAccountId, {
+            newsletterEmail: item.name,
+            status: NewsletterStatus.APPROVED,
+          });
+          await mutate();
+          return;
+        }
+      } catch (error) {
+        captureException(error);
       }
     };
     document.addEventListener("keydown", down);
@@ -902,6 +1045,7 @@ export function useBulkUnsubscribeShortcuts<T extends Row>({
     setSelectedRow,
     onOpenNewsletter,
     emailAccountId,
+    queueArchiveSenders,
   ]);
 }
 
@@ -924,4 +1068,43 @@ export function useNewsletterFilter() {
     filtersArray,
     setFilter,
   };
+}
+
+function didAutomaticUnsubscribeSucceed(
+  result: Awaited<ReturnType<typeof unsubscribeSenderAction>>,
+) {
+  if (result?.serverError) {
+    throw new Error(result.serverError);
+  }
+
+  return result?.data?.unsubscribe.success === true;
+}
+
+async function performAutomaticUnsubscribe({
+  emailAccountId,
+  newsletterEmail,
+  unsubscribeLink,
+}: {
+  emailAccountId: string;
+  newsletterEmail: string;
+  unsubscribeLink?: string | null;
+}) {
+  const unsubscribeResult = await unsubscribeSenderAction(emailAccountId, {
+    newsletterEmail,
+    unsubscribeLink,
+  });
+
+  return didAutomaticUnsubscribeSucceed(unsubscribeResult);
+}
+
+function getAutomaticUnsubscribeLink(unsubscribeLink?: string | null) {
+  return getHttpUnsubscribeLink({
+    unsubscribeLink,
+  });
+}
+
+function getManualUnsubscribeLink(unsubscribeLink?: string | null) {
+  return getUserFacingUnsubscribeLink({
+    unsubscribeLink,
+  });
 }

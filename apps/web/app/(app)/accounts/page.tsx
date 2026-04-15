@@ -2,9 +2,11 @@
 
 import { useAction } from "next-safe-action/hooks";
 import Link from "next/link";
-import { Trash2, MoreVertical, Settings, ArrowLeftRight, MailPlus } from "lucide-react";
+import { Trash2, MoreVertical, Settings } from "lucide-react";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import { AlertError } from "@/components/Alert";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { LoadingContent } from "@/components/LoadingContent";
 import { Button } from "@/components/ui/button";
@@ -20,15 +22,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/Input";
 import { useAccounts } from "@/hooks/useAccounts";
 import { deleteEmailAccountAction } from "@/utils/actions/user";
 import { toastSuccess, toastError } from "@/components/Toast";
@@ -39,16 +32,28 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageWrapper } from "@/components/PageWrapper";
 import { logOut } from "@/utils/user";
 import { getAndClearAuthErrorCookie } from "@/utils/auth-cookies";
-import { CopyRulesDialog } from "@/app/(app)/accounts/CopyRulesDialog";
 import { getActionErrorMessage } from "@/utils/error";
+import { BRAND_NAME } from "@/utils/branding";
+import {
+  CALENDAR_SCOPES,
+  SCOPES as MICROSOFT_EMAIL_SCOPES,
+} from "@/utils/outlook/scopes";
+import { MICROSOFT_DRIVE_SCOPES } from "@/utils/drive/scopes";
 
 export default function AccountsPage() {
   const { data, isLoading, error, mutate } = useAccounts();
-  useAccountNotifications();
+  const notification = useAccountNotifications();
 
   return (
     <PageWrapper>
       <PageHeader title="Accounts" />
+      {notification ? (
+        <AlertError
+          className="mt-4"
+          title={notification.title}
+          description={notification.description}
+        />
+      ) : null}
 
       <LoadingContent loading={isLoading} error={error}>
         <div className="grid grid-cols-1 gap-4 py-6 lg:grid-cols-2 xl:grid-cols-3">
@@ -56,7 +61,6 @@ export default function AccountsPage() {
             <AccountItem
               key={emailAccount.id}
               emailAccount={emailAccount}
-              allAccounts={data.emailAccounts}
               onAccountDeleted={mutate}
             />
           ))}
@@ -69,7 +73,6 @@ export default function AccountsPage() {
 
 function AccountItem({
   emailAccount,
-  allAccounts,
   onAccountDeleted,
 }: {
   emailAccount: {
@@ -78,20 +81,7 @@ function AccountItem({
     email: string;
     image: string | null;
     isPrimary: boolean;
-    account: {
-      provider: string;
-    };
   };
-  allAccounts: Array<{
-    id: string;
-    name: string | null;
-    email: string;
-    image: string | null;
-    isPrimary: boolean;
-    account: {
-      provider: string;
-    };
-  }>;
   onAccountDeleted: () => void;
 }) {
   return (
@@ -99,7 +89,6 @@ function AccountItem({
       <Card className="cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-900">
         <AccountHeader
           emailAccount={emailAccount}
-          allAccounts={allAccounts}
           onAccountDeleted={onAccountDeleted}
         />
       </Card>
@@ -109,7 +98,6 @@ function AccountItem({
 
 function AccountHeader({
   emailAccount,
-  allAccounts,
   onAccountDeleted,
 }: {
   emailAccount: {
@@ -118,20 +106,7 @@ function AccountHeader({
     email: string;
     image: string | null;
     isPrimary: boolean;
-    account: {
-      provider: string;
-    };
   };
-  allAccounts: Array<{
-    id: string;
-    name: string | null;
-    email: string;
-    image: string | null;
-    isPrimary: boolean;
-    account: {
-      provider: string;
-    };
-  }>;
   onAccountDeleted: () => void;
 }) {
   return (
@@ -157,7 +132,6 @@ function AccountHeader({
       >
         <AccountOptionsDropdown
           emailAccount={emailAccount}
-          allAccounts={allAccounts}
           onAccountDeleted={onAccountDeleted}
         />
       </div>
@@ -167,35 +141,15 @@ function AccountHeader({
 
 function AccountOptionsDropdown({
   emailAccount,
-  allAccounts,
   onAccountDeleted,
 }: {
   emailAccount: {
     id: string;
     email: string;
-    image: string | null;
     isPrimary: boolean;
-    account: {
-      provider: string;
-    };
   };
-  allAccounts: Array<{
-    id: string;
-    name: string | null;
-    email: string;
-    image: string | null;
-    isPrimary: boolean;
-    account: {
-      provider: string;
-    };
-  }>;
   onAccountDeleted: () => void;
 }) {
-  const [copyRulesDialogOpen, setCopyRulesDialogOpen] = useState(false);
-  const [sharedMailboxDialogOpen, setSharedMailboxDialogOpen] = useState(false);
-  const [sharedMailboxEmail, setSharedMailboxEmail] = useState("");
-  const [isLinking, setIsLinking] = useState(false);
-
   const { execute, isExecuting } = useAction(deleteEmailAccountAction, {
     onSuccess: async () => {
       toastSuccess({
@@ -207,149 +161,61 @@ function AccountOptionsDropdown({
         await logOut("/login");
       }
     },
+    onError: (error) => {
+      toastError({
+        title: "Error deleting email account",
+        description: getActionErrorMessage(error.error),
+      });
+      onAccountDeleted();
+    },
   });
 
-  const handleAddSharedMailbox = async () => {
-    if (!sharedMailboxEmail) return;
-    setIsLinking(true);
-    try {
-      const { getAccountLinkingUrl } = await import("@/utils/account-linking");
-      const url = await getAccountLinkingUrl("microsoft", sharedMailboxEmail);
-      window.location.href = url;
-    } catch (error) {
-      console.error("Error initiating shared mailbox link:", error);
-      toastError({
-        title: "Error",
-        description: "Failed to initiate account linking.",
-      });
-      setIsLinking(false);
-    }
-  };
-
-  const isMicrosoft = emailAccount.account.provider === "microsoft";
-
-  const sourceAccounts = allAccounts.filter(
-    (account) => account.id !== emailAccount.id,
-  );
-
   return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon">
-            <MoreVertical className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-          <DropdownMenuItem asChild>
-            <Link
-              href={prefixPath(emailAccount.id, "/setup")}
-              className="flex items-center gap-2"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Settings className="size-4" />
-              Setup
-            </Link>
-          </DropdownMenuItem>
-          {isMicrosoft && (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon">
+          <MoreVertical className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuItem asChild>
+          <Link
+            href={prefixPath(emailAccount.id, "/setup")}
+            className="flex items-center gap-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Settings className="size-4" />
+            Setup
+          </Link>
+        </DropdownMenuItem>
+        <ConfirmDialog
+          trigger={
             <DropdownMenuItem
               onSelect={(e) => {
+                e?.preventDefault();
                 e?.stopPropagation?.();
-                setSharedMailboxDialogOpen(true);
               }}
               onClick={(e) => e.stopPropagation()}
+              className="flex items-center gap-2 text-destructive focus:text-destructive"
+              disabled={isExecuting}
             >
-              <MailPlus className="size-4" />
-              Add shared mailbox
+              <Trash2 className="size-4" />
+              Delete
             </DropdownMenuItem>
-          )}
-          {sourceAccounts.length > 0 && (
-            <DropdownMenuItem
-              onSelect={(e) => {
-                e?.stopPropagation?.();
-                setCopyRulesDialogOpen(true);
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <ArrowLeftRight className="size-4" />
-              Copy rules to...
-            </DropdownMenuItem>
-          )}
-          <ConfirmDialog
-            trigger={
-              <DropdownMenuItem
-                onSelect={(e) => {
-                  e?.preventDefault();
-                  e?.stopPropagation?.();
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="flex items-center gap-2 text-destructive focus:text-destructive"
-                disabled={isExecuting}
-              >
-                <Trash2 className="size-4" />
-                Delete
-              </DropdownMenuItem>
-            }
-            title="Delete Account"
-            description={
-              emailAccount.isPrimary
-                ? `Are you sure you want to delete "${emailAccount.email}"? This is your primary account. You will be logged out and need to log in again. Your oldest remaining account will become your new primary account. All data for "${emailAccount.email}" will be permanently deleted from Inbox Zero.`
-                : `Are you sure you want to delete "${emailAccount.email}"? This will delete all data for it on Inbox Zero.`
-            }
-            confirmText="Delete"
-            onConfirm={() => {
-              execute({ emailAccountId: emailAccount.id });
-            }}
-          />
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <CopyRulesDialog
-        open={copyRulesDialogOpen}
-        onOpenChange={setCopyRulesDialogOpen}
-        targetAccountId={emailAccount.id}
-        targetAccountEmail={emailAccount.email}
-        sourceAccounts={sourceAccounts}
-      />
-
-      <Dialog
-        open={sharedMailboxDialogOpen}
-        onOpenChange={setSharedMailboxDialogOpen}
-      >
-        <DialogContent onClick={(e) => e.stopPropagation()}>
-          <DialogHeader>
-            <DialogTitle>Add Shared Mailbox</DialogTitle>
-            <DialogDescription>
-              Enter the email address of the shared mailbox you want to access
-              using the credentials of {emailAccount.email}.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            <Input
-              type="email"
-              name="sharedMailboxEmail"
-              placeholder="shared-mailbox@company.com"
-              registerProps={{
-                value: sharedMailboxEmail,
-                onChange: (e: any) => setSharedMailboxEmail(e.target.value),
-              }}
-              className="w-full"
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setSharedMailboxDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleAddSharedMailbox} disabled={isLinking}>
-              {isLinking ? "Redirecting..." : "Add Mailbox"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+          }
+          title="Delete Account"
+          description={
+            emailAccount.isPrimary
+              ? `Are you sure you want to delete "${emailAccount.email}"? This is your primary account. You will be logged out and need to log in again. Your oldest remaining account will become your new primary account. All data for "${emailAccount.email}" will be permanently deleted from ${BRAND_NAME}.`
+              : `Are you sure you want to delete "${emailAccount.email}"? This will delete all data for it on ${BRAND_NAME}.`
+          }
+          confirmText="Delete"
+          onConfirm={() => {
+            execute({ emailAccountId: emailAccount.id });
+          }}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -357,6 +223,9 @@ function useAccountNotifications() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const [notification, setNotification] = useState<AccountNotification | null>(
+    null,
+  );
 
   useEffect(() => {
     const authErrorCookie = getAndClearAuthErrorCookie();
@@ -364,55 +233,19 @@ function useAccountNotifications() {
     const successParam = searchParams.get("success");
 
     if (errorParam) {
-      const errorMessages: Record<
-        string,
-        { title: string; description: string }
-      > = {
-        account_not_found_for_merge: {
-          title: "Account not found",
-          description:
-            "This account doesn't exist in Inbox Zero yet. Please select 'No, it's a new account' instead.",
-        },
-        account_already_exists_use_merge: {
-          title: "Account already exists",
-          description:
-            "This account already exists in Inbox Zero. Please select 'Yes, it's an existing Inbox Zero account' to merge.",
-        },
-        already_linked_to_self: {
-          title: "Account already linked",
-          description: "This account is already linked to your profile.",
-        },
-        invalid_state: {
-          title: "Invalid request",
-          description:
-            "The authentication request was invalid. Please try again.",
-        },
-        missing_code: {
-          title: "Authentication failed",
-          description:
-            "Failed to receive authentication code. Please try again.",
-        },
-        link_failed: {
-          title: "Account linking failed",
-          description:
-            searchParams.get("error_description") ||
-            "Failed to link account. Please try again.",
-        },
-      };
-
-      const errorMessage = errorMessages[errorParam] || {
-        title: "Error",
-        description:
-          searchParams.get("error_description") ||
-          "An error occurred. Please try again.",
-      };
+      const errorMessage = getAccountErrorMessage(
+        errorParam,
+        searchParams.get("error_description"),
+      );
+      setNotification(errorMessage);
 
       toastError({
         title: errorMessage.title,
-        description: errorMessage.description,
+        description: errorMessage.toastDescription,
       });
 
       router.replace(pathname);
+      return;
     }
 
     if (successParam) {
@@ -428,6 +261,10 @@ function useAccountNotifications() {
           title: "Account added successfully!",
           description: "Your new account has been linked.",
         },
+        tokens_updated: {
+          title: "Account reconnected successfully!",
+          description: "Your account permissions were refreshed.",
+        },
       };
 
       const successMessage = successMessages[successParam] || {
@@ -440,7 +277,150 @@ function useAccountNotifications() {
         description: successMessage.description,
       });
 
+      setNotification(null);
       router.replace(pathname);
     }
   }, [searchParams, router, pathname]);
+
+  return notification;
+}
+
+type AccountNotification = {
+  title: string;
+  description: ReactNode;
+  toastDescription: string;
+};
+
+function getAccountErrorMessage(
+  errorParam: string,
+  errorDescription: string | null,
+): AccountNotification {
+  const defaultDescription =
+    errorDescription || "An error occurred. Please try again.";
+
+  const errorMessages: Record<string, AccountNotification> = {
+    account_not_found_for_merge: {
+      title: "Account not found",
+      description: `This account doesn't exist in ${BRAND_NAME} yet. Please select 'No, it's a new account' instead.`,
+      toastDescription: `This account doesn't exist in ${BRAND_NAME} yet. Please select 'No, it's a new account' instead.`,
+    },
+    account_already_exists_use_merge: {
+      title: "Account already exists",
+      description: `This account already exists in ${BRAND_NAME}. Please select 'Yes, it's an existing ${BRAND_NAME} account' to merge.`,
+      toastDescription: `This account already exists in ${BRAND_NAME}. Please select 'Yes, it's an existing ${BRAND_NAME} account' to merge.`,
+    },
+    already_linked_to_self: {
+      title: "Account already linked",
+      description: "This account is already linked to your profile.",
+      toastDescription: "This account is already linked to your profile.",
+    },
+    invalid_state: {
+      title: "Invalid request",
+      description: "The authentication request was invalid. Please try again.",
+      toastDescription:
+        "The authentication request was invalid. Please try again.",
+    },
+    invalid_state_format: {
+      title: "Invalid response from provider",
+      description:
+        "We couldn't validate the account authorization response. Please try linking the account again. If the problem continues, contact support.",
+      toastDescription:
+        "We couldn't validate the account authorization response. Please try linking the account again.",
+    },
+    missing_code: {
+      title: "Authentication failed",
+      description: "Failed to receive authentication code. Please try again.",
+      toastDescription:
+        "Failed to receive authentication code. Please try again.",
+    },
+    consent_declined: {
+      title: "Microsoft permissions were not granted",
+      description: `Microsoft sign-in was canceled before ${BRAND_NAME} received the required permissions. Please try again and complete the consent screen.`,
+      toastDescription: `Microsoft sign-in was canceled before ${BRAND_NAME} received the required permissions. Please try again and complete the consent screen.`,
+    },
+    admin_consent_required: {
+      title: "Admin approval required",
+      description: buildMicrosoftPermissionHelp(
+        `Your Microsoft 365 organization requires admin approval before ${BRAND_NAME} can access this account.`,
+      ),
+      toastDescription: `Your Microsoft 365 organization requires admin approval before ${BRAND_NAME} can access this account. Ask your Microsoft 365 admin to approve ${BRAND_NAME}, then try again.`,
+    },
+    invalid_scope_configuration: {
+      title: "Microsoft app setup needs attention",
+      description: buildMicrosoftPermissionHelp(
+        "Microsoft rejected the requested permissions for this app.",
+      ),
+      toastDescription:
+        "Microsoft rejected the requested permissions for this app. Ask your admin to verify the delegated Microsoft Graph permissions and redirect URLs, then try again.",
+    },
+    consent_incomplete: {
+      title: "More Microsoft permissions are required",
+      description: buildMicrosoftPermissionHelp(
+        `Microsoft connected the account, but did not grant all required permissions to ${BRAND_NAME}.`,
+      ),
+      toastDescription: `Microsoft connected the account, but did not grant all required permissions. Reconnect and approve every requested permission. If your organization restricts consent, ask your admin to approve ${BRAND_NAME} first.`,
+    },
+    link_failed: {
+      title: "Account linking failed",
+      description:
+        errorDescription || "Failed to link account. Please try again.",
+      toastDescription:
+        errorDescription || "Failed to link account. Please try again.",
+    },
+  };
+
+  return (
+    errorMessages[errorParam] || {
+      title: "Error",
+      description: defaultDescription,
+      toastDescription: defaultDescription,
+    }
+  );
+}
+
+function buildMicrosoftPermissionHelp(summary: string) {
+  return (
+    <div className="space-y-3">
+      <p>
+        {summary} This usually means your Microsoft 365 organization allowed
+        sign-in, but did not return all of the permissions needed to finish
+        connecting the account.
+      </p>
+      <p>
+        Ask your Microsoft 365 admin to approve {BRAND_NAME} for the Microsoft
+        Graph permissions below, then try again.
+      </p>
+      <div>
+        <p className="font-medium">Email and inbox connection</p>
+        <PermissionList scopes={MICROSOFT_EMAIL_SCOPES} />
+      </div>
+      <div>
+        <p className="font-medium">
+          Additional permissions if you later connect other Microsoft features
+        </p>
+        <div className="space-y-2">
+          <div>
+            <p className="font-medium">Calendar</p>
+            <PermissionList scopes={CALENDAR_SCOPES} />
+          </div>
+          <div>
+            <p className="font-medium">Docs and OneDrive</p>
+            <PermissionList scopes={MICROSOFT_DRIVE_SCOPES} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PermissionList({ scopes }: { scopes: readonly string[] }) {
+  return (
+    <ul className="mt-1 list-disc space-y-1 pl-5">
+      {scopes.map((scope) => (
+        <li key={scope}>
+          <code>{scope}</code>
+        </li>
+      ))}
+    </ul>
+  );
 }

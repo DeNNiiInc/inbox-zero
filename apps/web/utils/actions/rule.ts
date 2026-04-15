@@ -9,6 +9,7 @@ import {
   updateRuleSettingsBody,
   enableDraftRepliesBody,
   enableMultiRuleSelectionBody,
+  updateDraftReplyConfidenceBody,
   deleteRuleBody,
   createRulesOnboardingBody,
   type CategoryConfig,
@@ -22,13 +23,18 @@ import prisma from "@/utils/prisma";
 import { isDuplicateError, isNotFoundError } from "@/utils/prisma-helpers";
 import { flattenConditions } from "@/utils/condition";
 import { ActionType, SystemType } from "@/generated/prisma/enums";
-import type { Prisma } from "@/generated/prisma/client";
 import { sanitizeActionFields } from "@/utils/action-item";
 import {
   deleteRule,
   upsertSystemRule,
   createRule,
   updateRule,
+  createRuleWithResolvedActions,
+  replaceRuleWithResolvedActions,
+  setRuleEnabled,
+  updateRuleInstructions,
+  type RuleActionCreateData,
+  addActionOwnershipToInput,
 } from "@/utils/rule/rule";
 import { SafeError } from "@/utils/error";
 import {
@@ -38,6 +44,7 @@ import {
   getActionTypesForCategoryAction,
 } from "@/utils/rule/consts";
 import { actionClient, actionClientUser } from "@/utils/actions/safe-action";
+import { env } from "@/env";
 import { prefixPath } from "@/utils/path";
 import { ONE_WEEK_MINUTES } from "@/utils/date";
 import { createEmailProvider } from "@/utils/email/provider";
@@ -46,7 +53,8 @@ import type { Logger } from "@/utils/logger";
 import { validateGmailLabelName } from "@/utils/gmail/label-validation";
 import { isGoogleProvider } from "@/utils/email/provider-types";
 import { bulkProcessInboxEmails } from "@/utils/ai/choose-rule/bulk-process-emails";
-import { getEmailAccountWithAi } from "@/utils/user/get";
+import { getEmailAccountForRuleExecution } from "@/utils/user/get";
+import type { AttachmentSourceInput } from "@/utils/attachments/source-schema";
 
 export const createRuleAction = actionClient
   .metadata({ name: "createRule" })
@@ -76,7 +84,7 @@ export const createRuleAction = actionClient
           result: {
             name,
             condition: {
-              aiInstructions: conditions.instructions,
+              aiInstructions: conditions.instructions ?? null,
               conditionalOperator: conditionalOperator || null,
               static: {
                 from: conditions.from || null,
@@ -129,7 +137,7 @@ export const updateRuleAction = actionClient
           result: {
             name: name || "",
             condition: {
-              aiInstructions: conditions.instructions,
+              aiInstructions: conditions.instructions ?? null,
               conditionalOperator: conditionalOperator || null,
               static: {
                 from: conditions.from || null,
@@ -162,9 +170,10 @@ export const updateRuleSettingsAction = actionClient
       });
       if (!currentRule) throw new SafeError("Rule not found");
 
-      await prisma.rule.update({
-        where: { id, emailAccountId },
-        data: { instructions },
+      await updateRuleInstructions({
+        ruleId: id,
+        emailAccountId,
+        instructions,
       });
 
       revalidatePath(prefixPath(emailAccountId, "/reply-zero"));
@@ -179,7 +188,9 @@ export const enableDraftRepliesAction = actionClient
       ctx: { emailAccountId, provider, logger },
       parsedInput: { enable },
     }) => {
-      let rule = await prisma.rule.findUnique({
+      if (env.NEXT_PUBLIC_AUTO_DRAFT_DISABLED && enable) return;
+
+      const existingRule = await prisma.rule.findUnique({
         where: {
           emailAccountId_systemType: {
             emailAccountId,
@@ -189,21 +200,26 @@ export const enableDraftRepliesAction = actionClient
         include: { actions: true },
       });
 
-      if (!rule && !enable) {
+      if (!existingRule && !enable) {
         return;
       }
 
-      // if rule doesn't exist, then toggle will create it
-      rule =
-        rule ||
-        (await toggleRule({
-          emailAccountId,
-          enabled: enable,
-          systemType: SystemType.TO_REPLY,
-          provider,
-          ruleId: undefined,
-          logger,
-        }));
+      const rule = existingRule
+        ? existingRule.enabled === enable
+          ? existingRule
+          : await setRuleEnabled({
+              ruleId: existingRule.id,
+              emailAccountId,
+              enabled: enable,
+            })
+        : await toggleRule({
+            emailAccountId,
+            enabled: enable,
+            systemType: SystemType.TO_REPLY,
+            provider,
+            ruleId: undefined,
+            logger,
+          });
 
       if (enable) {
         const alreadyDraftingReplies = rule.actions.find(
@@ -211,10 +227,13 @@ export const enableDraftRepliesAction = actionClient
         );
         if (!alreadyDraftingReplies) {
           await prisma.action.create({
-            data: {
-              ruleId: rule.id,
-              type: ActionType.DRAFT_EMAIL,
-            },
+            data: addActionOwnershipToInput(
+              {
+                ruleId: rule.id,
+                type: ActionType.DRAFT_EMAIL,
+              },
+              emailAccountId,
+            ),
           });
         }
       } else {
@@ -240,17 +259,35 @@ export const enableMultiRuleSelectionAction = actionClient
     });
   });
 
+export const updateDraftReplyConfidenceAction = actionClient
+  .metadata({ name: "updateDraftReplyConfidence" })
+  .inputSchema(updateDraftReplyConfidenceBody)
+  .action(async ({ ctx: { emailAccountId }, parsedInput: { confidence } }) => {
+    await prisma.emailAccount.update({
+      where: { id: emailAccountId },
+      data: { draftReplyConfidence: confidence },
+    });
+  });
+
 export const deleteRuleAction = actionClient
   .metadata({ name: "deleteRule" })
   .inputSchema(deleteRuleBody)
   .action(async ({ ctx: { emailAccountId }, parsedInput: { id } }) => {
     const rule = await prisma.rule.findUnique({
-      where: { id, emailAccountId },
-      include: { actions: true, group: true },
+      where: {
+        id_emailAccountId: {
+          id,
+          emailAccountId,
+        },
+      },
+      select: { systemType: true, groupId: true },
     });
     if (!rule) return; // already deleted
-    if (rule.emailAccountId !== emailAccountId)
-      throw new SafeError("You don't have permission to delete this rule");
+    if (rule.systemType) {
+      throw new SafeError(
+        "Default rules cannot be deleted. Disable them instead.",
+      );
+    }
 
     try {
       await deleteRule({
@@ -282,7 +319,9 @@ export const createRulesOnboardingAction = actionClient
         }
       }
 
-      const emailAccount = await getEmailAccountWithAi({ emailAccountId });
+      const emailAccount = await getEmailAccountForRuleExecution({
+        emailAccountId,
+      });
       if (!emailAccount) throw new SafeError("User not found");
 
       const promises: Promise<unknown>[] = [];
@@ -325,6 +364,7 @@ export const createRulesOnboardingAction = actionClient
             emailAccountId,
             systemType,
             runOnThreads,
+            enabled: true,
             logger,
           });
         })();
@@ -398,19 +438,18 @@ export const createRulesOnboardingAction = actionClient
             systemType: undefined,
           });
 
-          const promise = prisma.rule
-            .create({
-              data: {
-                emailAccountId,
-                name: customCategory.name,
-                instructions:
-                  customCategory.description ||
-                  `Custom category: ${customCategory.name}`,
-                systemType: null,
-                runOnThreads: true,
-                actions: { createMany: { data: actions } },
-              },
-            })
+          const promise = createRuleWithResolvedActions({
+            emailAccountId,
+            data: {
+              name: customCategory.name,
+              instructions:
+                customCategory.description ||
+                `Custom category: ${customCategory.name}`,
+              systemType: null,
+              runOnThreads: true,
+            },
+            actions,
+          })
             .then(() => {})
             .catch((error) => {
               if (isDuplicateError(error, "name")) return;
@@ -459,10 +498,26 @@ export const toggleAllRulesAction = actionClient
   .metadata({ name: "toggleAllRules" })
   .inputSchema(toggleAllRulesBody)
   .action(async ({ ctx: { emailAccountId }, parsedInput: { enabled } }) => {
-    await prisma.rule.updateMany({
-      where: { emailAccountId },
-      data: { enabled },
-    });
+    if (enabled) {
+      await prisma.rule.updateMany({
+        where: { emailAccountId },
+        data: { enabled },
+      });
+    } else {
+      await prisma.$transaction([
+        prisma.rule.updateMany({
+          where: { emailAccountId },
+          data: { enabled },
+        }),
+        prisma.emailAccount.update({
+          where: { id: emailAccountId },
+          data: {
+            followUpAwaitingReplyDays: null,
+            followUpNeedsReplyDays: null,
+          },
+        }),
+      ]);
+    }
 
     return { success: true };
   });
@@ -561,8 +616,9 @@ export const copyRulesFromAccountAction = actionClientUser
         }));
 
         if (existingRuleId) {
-          await prisma.rule.update({
-            where: { id: existingRuleId },
+          await replaceRuleWithResolvedActions({
+            ruleId: existingRuleId,
+            emailAccountId: targetEmailAccountId,
             data: {
               instructions: sourceRule.instructions,
               enabled: sourceRule.enabled,
@@ -572,35 +628,35 @@ export const copyRulesFromAccountAction = actionClientUser
               to: sourceRule.to,
               subject: sourceRule.subject,
               body: sourceRule.body,
-              // Drop groupId - it's account-specific
               groupId: null,
-              actions: {
-                deleteMany: {},
-                createMany: { data: mappedActions },
-              },
             },
+            actions: mappedActions,
           });
           replacedCount++;
         } else {
-          await prisma.rule.create({
-            data: {
+          try {
+            await createRuleWithResolvedActions({
               emailAccountId: targetEmailAccountId,
-              name: sourceRule.name,
-              systemType: sourceRule.systemType,
-              instructions: sourceRule.instructions,
-              enabled: sourceRule.enabled,
-              runOnThreads: sourceRule.runOnThreads,
-              conditionalOperator: sourceRule.conditionalOperator,
-              from: sourceRule.from,
-              to: sourceRule.to,
-              subject: sourceRule.subject,
-              body: sourceRule.body,
-              // Drop groupId - it's account-specific
-              groupId: null,
-              actions: { createMany: { data: mappedActions } },
-            },
-          });
-          copiedCount++;
+              data: {
+                name: sourceRule.name,
+                systemType: sourceRule.systemType,
+                instructions: sourceRule.instructions,
+                enabled: sourceRule.enabled,
+                runOnThreads: sourceRule.runOnThreads,
+                conditionalOperator: sourceRule.conditionalOperator,
+                from: sourceRule.from,
+                to: sourceRule.to,
+                subject: sourceRule.subject,
+                body: sourceRule.body,
+                groupId: null,
+              },
+              actions: mappedActions,
+            });
+            copiedCount++;
+          } catch (error) {
+            if (!isDuplicateError(error, "name")) throw error;
+            logger.info("Rule already exists in target account, skipping");
+          }
         }
       }
 
@@ -631,11 +687,7 @@ async function toggleRule({
   logger: Logger;
 }) {
   if (ruleId) {
-    return await prisma.rule.update({
-      where: { id: ruleId, emailAccountId },
-      data: { enabled },
-      include: { actions: true },
-    });
+    return await setRuleEnabled({ ruleId, emailAccountId, enabled });
   }
 
   if (!systemType) {
@@ -652,10 +704,10 @@ async function toggleRule({
   });
 
   if (existingRule) {
-    return await prisma.rule.update({
-      where: { id: existingRule.id },
-      data: { enabled },
-      include: { actions: true },
+    return await setRuleEnabled({
+      ruleId: existingRule.id,
+      emailAccountId,
+      enabled,
     });
   }
 
@@ -668,7 +720,7 @@ async function toggleRule({
   const ruleConfig = getRuleConfig(systemType);
   const actionTypes = getSystemRuleActionTypes(systemType, provider);
 
-  const actions: Prisma.ActionCreateManyRuleInput[] = [];
+  const actions: RuleActionCreateData[] = [];
 
   for (const actionType of actionTypes) {
     if (actionType.includeFolder) {
@@ -705,6 +757,7 @@ async function toggleRule({
     emailAccountId,
     systemType,
     runOnThreads: ruleConfig.runOnThreads,
+    enabled,
     logger,
   });
 
@@ -724,6 +777,7 @@ async function toggleRule({
 
 function mapActionToSanitizedFields(action: {
   type: ActionType;
+  messagingChannelId?: string | null;
   labelId?: {
     name?: string | null;
     value?: string | null;
@@ -738,9 +792,11 @@ function mapActionToSanitizedFields(action: {
   folderName?: { value?: string | null } | null;
   folderId?: { value?: string | null } | null;
   delayInMinutes?: number | null;
+  staticAttachments?: AttachmentSourceInput[] | null;
 }) {
   const sanitized = sanitizeActionFields({
     type: action.type,
+    messagingChannelId: action.messagingChannelId ?? null,
     label: action.labelId?.name,
     labelId: action.labelId?.value,
     subject: action.subject?.value,
@@ -752,6 +808,9 @@ function mapActionToSanitizedFields(action: {
     folderName: action.folderName?.value,
     folderId: action.folderId?.value,
     delayInMinutes: action.delayInMinutes,
+    staticAttachments: action.staticAttachments?.length
+      ? action.staticAttachments
+      : undefined,
   });
 
   return {
@@ -766,9 +825,11 @@ function mapActionToSanitizedFields(action: {
       webhookUrl: sanitized.url ?? null,
       folderName: sanitized.folderName ?? null,
     },
+    messagingChannelId: sanitized.messagingChannelId ?? null,
     labelId: sanitized.labelId ?? null,
     folderId: sanitized.folderId ?? null,
     delayInMinutes: sanitized.delayInMinutes ?? null,
+    staticAttachments: sanitized.staticAttachments ?? null,
   };
 }
 
@@ -875,7 +936,7 @@ async function getActionsFromCategoryAction({
   provider: string;
   logger: Logger;
   systemType?: SystemType;
-}): Promise<Prisma.ActionCreateManyRuleInput[]> {
+}): Promise<RuleActionCreateData[]> {
   const emailProvider = await createEmailProvider({
     emailAccountId,
     provider,
@@ -906,7 +967,7 @@ async function getActionsFromCategoryAction({
     hasDigest,
   });
 
-  const actions: Prisma.ActionCreateManyRuleInput[] = [];
+  const actions: RuleActionCreateData[] = [];
 
   for (const actionType of actionTypes) {
     switch (actionType.type) {
@@ -1011,9 +1072,9 @@ export const importRulesAction = actionClient
           }));
 
           if (existingRuleId) {
-            // Update existing rule
-            await prisma.rule.update({
-              where: { id: existingRuleId },
+            await replaceRuleWithResolvedActions({
+              ruleId: existingRuleId,
+              emailAccountId,
               data: {
                 instructions: rule.instructions,
                 enabled: rule.enabled ?? true,
@@ -1026,18 +1087,14 @@ export const importRulesAction = actionClient
                 subject: rule.subject,
                 body: rule.body,
                 groupId: null,
-                actions: {
-                  deleteMany: {},
-                  createMany: { data: mappedActions },
-                },
               },
+              actions: mappedActions,
             });
             updatedCount++;
           } else {
-            // Create new rule
-            await prisma.rule.create({
+            await createRuleWithResolvedActions({
+              emailAccountId,
               data: {
-                emailAccountId,
                 name: rule.name,
                 systemType: rule.systemType,
                 instructions: rule.instructions,
@@ -1051,8 +1108,8 @@ export const importRulesAction = actionClient
                 subject: rule.subject,
                 body: rule.body,
                 groupId: null,
-                actions: { createMany: { data: mappedActions } },
               },
+              actions: mappedActions,
             });
             createdCount++;
           }

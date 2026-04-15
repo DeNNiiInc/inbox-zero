@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { FolderIcon, Loader2Icon } from "lucide-react";
+import { FolderIcon, Loader2Icon, PlusIcon } from "lucide-react";
 import {
   Card,
+  CardBasic,
   CardContent,
   CardDescription,
   CardHeader,
@@ -40,6 +41,7 @@ import type {
   FolderItem,
   SavedFolder,
 } from "@/app/api/user/drive/folders/route";
+import { AlertBasic } from "@/components/Alert";
 import {
   Empty,
   EmptyContent,
@@ -48,7 +50,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { Button } from "@/components/ui/button";
+import { Button, type ButtonProps } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -62,7 +64,7 @@ import { useDialogState } from "@/hooks/useDialogState";
 import { useDriveConnections } from "@/hooks/useDriveConnections";
 
 export function AllowedFolders({ emailAccountId }: { emailAccountId: string }) {
-  const { data, isLoading, error, mutate } = useDriveFolders();
+  const { data, isLoading, error, mutate } = useDriveFolders(emailAccountId);
   const { data: connectionsData } = useDriveConnections();
   const driveConnectionId = connectionsData?.connections[0]?.id;
 
@@ -73,6 +75,7 @@ export function AllowedFolders({ emailAccountId }: { emailAccountId: string }) {
           emailAccountId={emailAccountId}
           availableFolders={data.availableFolders}
           savedFolders={data.savedFolders}
+          staleFolderCount={data.staleFolderDbIds.length}
           mutateFolders={mutate}
           driveConnectionId={driveConnectionId ?? null}
         />
@@ -86,20 +89,42 @@ function AllowedFoldersContent({
   driveConnectionId,
   availableFolders,
   savedFolders,
+  staleFolderCount,
   mutateFolders,
 }: {
   emailAccountId: string;
   driveConnectionId: string | null;
   availableFolders: FolderItem[];
   savedFolders: SavedFolder[];
+  staleFolderCount: number;
   mutateFolders: () => void;
 }) {
-  const [isFolderBusy, setIsFolderBusy] = useState(false);
+  const [optimisticFolderIds, setOptimisticFolderIds] = useState<Set<string>>(
+    () => new Set(savedFolders.map((f) => f.folderId)),
+  );
+
+  const serverFolderIds = useMemo(
+    () => savedFolders.map((f) => f.folderId).join(","),
+    [savedFolders],
+  );
+  const prevServerFolderIds = useRef(serverFolderIds);
+
+  useEffect(() => {
+    if (serverFolderIds === prevServerFolderIds.current) return;
+    prevServerFolderIds.current = serverFolderIds;
+    setOptimisticFolderIds(new Set(savedFolders.map((f) => f.folderId)));
+  }, [savedFolders, serverFolderIds]);
 
   const handleFolderToggle = useCallback(
     async (folder: FolderItem, isChecked: boolean) => {
       const folderPath = folder.path || folder.name;
-      setIsFolderBusy(true);
+
+      setOptimisticFolderIds((prev) => {
+        const next = new Set(prev);
+        if (isChecked) next.add(folder.id);
+        else next.delete(folder.id);
+        return next;
+      });
 
       try {
         if (isChecked) {
@@ -111,6 +136,11 @@ function AllowedFoldersContent({
           });
 
           if (result?.serverError) {
+            setOptimisticFolderIds((prev) => {
+              const next = new Set(prev);
+              next.delete(folder.id);
+              return next;
+            });
             toastError({
               title: "Error adding folder",
               description: result.serverError,
@@ -124,6 +154,11 @@ function AllowedFoldersContent({
           });
 
           if (result?.serverError) {
+            setOptimisticFolderIds((prev) => {
+              const next = new Set(prev);
+              next.add(folder.id);
+              return next;
+            });
             toastError({
               title: "Error removing folder",
               description: result.serverError,
@@ -132,8 +167,17 @@ function AllowedFoldersContent({
             mutateFolders();
           }
         }
-      } finally {
-        setIsFolderBusy(false);
+      } catch {
+        setOptimisticFolderIds((prev) => {
+          const next = new Set(prev);
+          if (isChecked) next.delete(folder.id);
+          else next.add(folder.id);
+          return next;
+        });
+        toastError({
+          title: isChecked ? "Error adding folder" : "Error removing folder",
+          description: "Please try again.",
+        });
       }
     },
     [emailAccountId, mutateFolders],
@@ -167,10 +211,8 @@ function AllowedFoldersContent({
     return map;
   }, [availableFolders]);
 
-  const savedFolderIds = useMemo(
-    () => new Set(savedFolders.map((f) => f.folderId)),
-    [savedFolders],
-  );
+  const savedFolderIds = optimisticFolderIds;
+  const hasFolders = rootFolders.length > 0;
 
   return (
     <Card size="sm">
@@ -179,30 +221,51 @@ function AllowedFoldersContent({
         <CardDescription>AI can only file to these folders</CardDescription>
       </CardHeader>
       <CardContent>
-        {rootFolders.length > 0 ? (
-          <TreeProvider
-            showLines
-            showIcons
-            selectable={false}
-            animateExpand
-            indent={16}
-          >
-            <TreeView className="p-0">
-              {rootFolders.map((folder, index) => (
-                <FolderNode
-                  key={folder.id}
-                  folder={folder}
-                  isLast={index === rootFolders.length - 1}
-                  selectedFolderIds={savedFolderIds}
-                  onToggle={handleFolderToggle}
-                  isDisabled={isFolderBusy}
-                  level={0}
-                  parentPath=""
-                  knownChildren={folderChildrenMap.get(folder.id)}
-                />
-              ))}
-            </TreeView>
-          </TreeProvider>
+        {staleFolderCount > 0 && (
+          <AlertBasic
+            className="mb-4"
+            variant="blue"
+            title="Deleted folders detected"
+            description={`Removed ${staleFolderCount} deleted folder${staleFolderCount === 1 ? "" : "s"} from your saved list.`}
+          />
+        )}
+        {hasFolders ? (
+          <>
+            <TreeProvider
+              showLines
+              showIcons
+              selectable={false}
+              animateExpand
+              indent={16}
+            >
+              <TreeView className="p-0">
+                {rootFolders.map((folder, index) => (
+                  <FolderNode
+                    key={folder.id}
+                    folder={folder}
+                    isLast={index === rootFolders.length - 1}
+                    selectedFolderIds={savedFolderIds}
+                    onToggle={handleFolderToggle}
+                    level={0}
+                    parentPath=""
+                    knownChildren={folderChildrenMap.get(folder.id)}
+                  />
+                ))}
+              </TreeView>
+            </TreeProvider>
+            <div className="mt-2">
+              <CreateFolderDialog
+                emailAccountId={emailAccountId}
+                driveConnectionId={driveConnectionId}
+                onFolderCreated={mutateFolders}
+                triggerLabel="Add folder"
+                triggerVariant="ghost"
+                triggerSize="xs-2"
+                triggerIcon={PlusIcon}
+                triggerClassName="text-muted-foreground hover:text-foreground"
+              />
+            </div>
+          </>
         ) : (
           <NoFoldersFound
             emailAccountId={emailAccountId}
@@ -220,7 +283,6 @@ export function FolderNode({
   isLast,
   selectedFolderIds,
   onToggle,
-  isDisabled,
   level,
   parentPath,
   knownChildren,
@@ -229,7 +291,6 @@ export function FolderNode({
   isLast: boolean;
   selectedFolderIds: Set<string>;
   onToggle: (folder: FolderItem, isChecked: boolean) => void;
-  isDisabled: boolean;
   level: number;
   parentPath: string;
   knownChildren?: FolderItem[];
@@ -270,7 +331,6 @@ export function FolderNode({
             onCheckedChange={(checked) =>
               onToggle({ ...folder, path: currentPath }, checked === true)
             }
-            disabled={isDisabled}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
@@ -293,7 +353,6 @@ export function FolderNode({
               isLast={index === subfolders.length - 1}
               selectedFolderIds={selectedFolderIds}
               onToggle={onToggle}
-              isDisabled={isDisabled}
               level={level + 1}
               parentPath={currentPath}
             />
@@ -319,6 +378,50 @@ export function NoFoldersFound({
   emailAccountId: string;
   driveConnectionId: string | null;
   onFolderCreated?: () => void;
+}) {
+  return (
+    <CardBasic className="mt-4 p-2">
+      <Empty className="border-0 p-0">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <FolderIcon />
+          </EmptyMedia>
+          <EmptyTitle>No folders found</EmptyTitle>
+          <EmptyDescription>
+            Create a folder in your drive to get started.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <CreateFolderDialog
+            emailAccountId={emailAccountId}
+            driveConnectionId={driveConnectionId}
+            onFolderCreated={onFolderCreated}
+            triggerLabel="Create folder"
+          />
+        </EmptyContent>
+      </Empty>
+    </CardBasic>
+  );
+}
+
+export function CreateFolderDialog({
+  emailAccountId,
+  driveConnectionId,
+  onFolderCreated,
+  triggerLabel,
+  triggerVariant = "default",
+  triggerSize = "default",
+  triggerIcon,
+  triggerClassName,
+}: {
+  emailAccountId: string;
+  driveConnectionId: string | null;
+  onFolderCreated?: () => void;
+  triggerLabel: string;
+  triggerVariant?: ButtonProps["variant"];
+  triggerSize?: ButtonProps["size"];
+  triggerIcon?: ButtonProps["Icon"];
+  triggerClassName?: string;
 }) {
   const { isOpen, onClose, onToggle } = useDialogState();
 
@@ -363,44 +466,39 @@ export function NoFoldersFound({
   );
 
   return (
-    <Empty>
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <FolderIcon />
-        </EmptyMedia>
-        <EmptyTitle>No folders found</EmptyTitle>
-        <EmptyDescription>
-          Create a folder in your drive to get started.
-        </EmptyDescription>
-      </EmptyHeader>
-      <EmptyContent>
-        <Dialog open={isOpen} onOpenChange={onToggle}>
-          <DialogTrigger asChild>
-            <Button disabled={!driveConnectionId}>Create folder</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create folder</DialogTitle>
-              <DialogDescription>
-                Create a new folder in your drive to organize your files.
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <Input
-                type="text"
-                name="folderName"
-                label="Folder name"
-                placeholder="e.g. Receipts"
-                registerProps={register("folderName")}
-                error={errors.folderName}
-              />
-              <Button type="submit" loading={isSubmitting}>
-                Create folder
-              </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </EmptyContent>
-    </Empty>
+    <Dialog open={isOpen} onOpenChange={onToggle}>
+      <DialogTrigger asChild>
+        <Button
+          disabled={!driveConnectionId}
+          variant={triggerVariant}
+          size={triggerSize}
+          Icon={triggerIcon}
+          className={triggerClassName}
+        >
+          {triggerLabel}
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Create folder</DialogTitle>
+          <DialogDescription>
+            Create a new folder in your drive to organize your files.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <Input
+            type="text"
+            name="folderName"
+            label="Folder name"
+            placeholder="e.g. Receipts"
+            registerProps={register("folderName")}
+            error={errors.folderName}
+          />
+          <Button type="submit" loading={isSubmitting}>
+            Create folder
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

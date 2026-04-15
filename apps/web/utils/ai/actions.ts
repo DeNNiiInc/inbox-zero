@@ -1,5 +1,5 @@
 import { after } from "next/server";
-import { ActionType } from "@/generated/prisma/enums";
+import { ActionType, MessagingMessageStatus } from "@/generated/prisma/enums";
 import type { ExecutedRule } from "@/generated/prisma/client";
 import type { Logger } from "@/utils/logger";
 import { callWebhook } from "@/utils/webhook";
@@ -13,19 +13,31 @@ import prisma from "@/utils/prisma";
 import { sendColdEmailNotification } from "@/utils/cold-email/send-notification";
 import { extractEmailAddress } from "@/utils/email";
 import { captureException } from "@/utils/error";
+import { env } from "@/env";
+import { ensureEmailSendingEnabled } from "@/utils/mail";
+import { resolveActionAttachments } from "@/utils/ai/action-attachments";
+import {
+  getMessagingRuleNotificationResult,
+  sendMessagingRuleNotification,
+} from "@/utils/messaging/rule-notifications";
+import { isMessagingDraftActionType } from "@/utils/actions/draft-reply";
 
 const MODULE = "ai-actions";
+
+type ExecutedRuleForAction = ExecutedRule & {
+  actionItems?: Pick<ActionItem, "type">[];
+};
 
 type ActionFunction<T extends Partial<Omit<ActionItem, "type">>> = (options: {
   client: EmailProvider;
   email: EmailForAction;
-  args: T;
+  args: T & Pick<ActionItem, "id">;
   userEmail: string;
   userId: string;
   emailAccountId: string;
-  executedRule: ExecutedRule;
+  executedRule: ExecutedRuleForAction;
   logger: Logger;
-}) => Promise<any>;
+}) => Promise<unknown>;
 
 export const runActionFunction = async (options: {
   client: EmailProvider;
@@ -34,7 +46,7 @@ export const runActionFunction = async (options: {
   userEmail: string;
   userId: string;
   emailAccountId: string;
-  executedRule: ExecutedRule;
+  executedRule: ExecutedRuleForAction;
   logger: Logger;
 }) => {
   const { action, userEmail, logger } = options;
@@ -60,11 +72,18 @@ export const runActionFunction = async (options: {
       return label(opts);
     case ActionType.DRAFT_EMAIL:
       return draft(opts);
+    case ActionType.DRAFT_MESSAGING_CHANNEL:
+      return draft_messaging_channel(opts);
+    case ActionType.NOTIFY_MESSAGING_CHANNEL:
+      return notify_messaging_channel(opts);
     case ActionType.REPLY:
+      ensureEmailSendingEnabled();
       return reply(opts);
     case ActionType.SEND_EMAIL:
+      ensureEmailSendingEnabled();
       return send_email(opts);
     case ActionType.FORWARD:
+      ensureEmailSendingEnabled();
       return forward(opts);
     case ActionType.MARK_SPAM:
       return mark_spam(opts);
@@ -149,18 +168,73 @@ const label: ActionFunction<{
 };
 
 const draft: ActionFunction<{
+  messagingChannelId?: string | null;
   subject?: string | null;
   content?: string | null;
   to?: string | null;
   cc?: string | null;
   bcc?: string | null;
-}> = async ({ client, email, args, userEmail, executedRule }) => {
+  staticAttachments?: ActionItem["staticAttachments"];
+}> = async ({
+  client,
+  email,
+  args,
+  userEmail,
+  userId,
+  emailAccountId,
+  executedRule,
+  logger,
+}) => {
+  if (env.NEXT_PUBLIC_AUTO_DRAFT_DISABLED) return;
+
+  if (
+    isLegacyMessagingDraft({
+      executedRule,
+      messagingChannelId: args.messagingChannelId,
+    })
+  ) {
+    if (args.id) {
+      const notificationResult = await getMessagingRuleNotificationResult({
+        executedActionId: args.id,
+        email,
+        logger,
+      });
+
+      if (
+        notificationResult.delivered &&
+        notificationResult.kind === "interactive"
+      ) {
+        return;
+      }
+
+      if (!notificationResult.delivered) {
+        logger.warn(
+          "Falling back to mailbox draft after messaging delivery failure",
+          {
+            actionId: args.id,
+          },
+        );
+      }
+    }
+  }
+
+  const attachments = await resolveActionAttachments({
+    email,
+    emailAccountId,
+    executedRule,
+    userId,
+    logger,
+    staticAttachments: args.staticAttachments,
+    includeAiSelectedAttachments: true,
+  });
+
   const draftArgs = {
     to: args.to ?? undefined,
     subject: args.subject ?? undefined,
     content: args.content ?? "",
     cc: args.cc ?? undefined,
     bcc: args.bcc ?? undefined,
+    attachments,
   };
 
   const result = await client.draftEmail(
@@ -186,12 +260,91 @@ const draft: ActionFunction<{
   return { draftId: result.draftId };
 };
 
+const draft_messaging_channel: ActionFunction<{
+  messagingChannelId?: string | null;
+}> = async ({ email, args, logger }) => {
+  if (!args.id) {
+    throw new Error("Missing action id for DRAFT_MESSAGING_CHANNEL");
+  }
+
+  if (!args.messagingChannelId) {
+    await failMessagingAction({
+      actionId: args.id,
+      logger,
+      reason: "Missing messaging channel for DRAFT_MESSAGING_CHANNEL",
+    });
+  }
+
+  const delivered = await sendMessagingRuleNotification({
+    executedActionId: args.id,
+    email,
+    logger,
+  });
+
+  if (delivered) return;
+
+  await failMessagingAction({
+    actionId: args.id,
+    logger,
+    reason: "Failed to deliver DRAFT_MESSAGING_CHANNEL notification",
+  });
+};
+
+const notify_messaging_channel: ActionFunction<{
+  messagingChannelId?: string | null;
+}> = async ({ email, args, logger }) => {
+  if (!args.id) {
+    throw new Error("Missing action id for NOTIFY_MESSAGING_CHANNEL");
+  }
+
+  if (!args.messagingChannelId) {
+    await failMessagingAction({
+      actionId: args.id,
+      logger,
+      reason: "Missing messaging channel for NOTIFY_MESSAGING_CHANNEL",
+    });
+  }
+
+  const delivered = await sendMessagingRuleNotification({
+    executedActionId: args.id,
+    email,
+    logger,
+  });
+
+  if (delivered) return;
+
+  await failMessagingAction({
+    actionId: args.id,
+    logger,
+    reason: "Failed to deliver NOTIFY_MESSAGING_CHANNEL notification",
+  });
+};
+
 const reply: ActionFunction<{
   content?: string | null;
   cc?: string | null;
   bcc?: string | null;
-}> = async ({ client, email, args }) => {
+  staticAttachments?: ActionItem["staticAttachments"];
+}> = async ({
+  client,
+  email,
+  args,
+  userId,
+  emailAccountId,
+  executedRule,
+  logger,
+}) => {
   if (!args.content) return;
+
+  const attachments = await resolveActionAttachments({
+    email,
+    emailAccountId,
+    executedRule,
+    userId,
+    logger,
+    staticAttachments: args.staticAttachments,
+    includeAiSelectedAttachments: false,
+  });
 
   await client.replyToEmail(
     {
@@ -208,6 +361,7 @@ const reply: ActionFunction<{
       textHtml: email.textHtml,
     },
     args.content,
+    { attachments },
   );
 };
 
@@ -217,8 +371,27 @@ const send_email: ActionFunction<{
   to?: string | null;
   cc?: string | null;
   bcc?: string | null;
-}> = async ({ client, args }) => {
+  staticAttachments?: ActionItem["staticAttachments"];
+}> = async ({
+  client,
+  args,
+  email,
+  userId,
+  emailAccountId,
+  executedRule,
+  logger,
+}) => {
   if (!args.to || !args.subject || !args.content) return;
+
+  const attachments = await resolveActionAttachments({
+    email,
+    emailAccountId,
+    executedRule,
+    userId,
+    logger,
+    staticAttachments: args.staticAttachments,
+    includeAiSelectedAttachments: false,
+  });
 
   const emailArgs = {
     to: args.to,
@@ -226,6 +399,7 @@ const send_email: ActionFunction<{
     bcc: args.bcc ?? undefined,
     subject: args.subject,
     messageText: args.content,
+    attachments,
   };
 
   await client.sendEmail(emailArgs);
@@ -369,7 +543,7 @@ const notify_sender: ActionFunction<Record<string, unknown>> = async ({
   const senderEmail = extractEmailAddress(email.headers.from);
   if (!senderEmail) {
     logger.error("Could not extract sender email for notify_sender action");
-    return;
+    return { success: false, errorCode: "MISSING_SENDER_EMAIL" };
   }
 
   const result = await sendColdEmailNotification({
@@ -381,11 +555,17 @@ const notify_sender: ActionFunction<Record<string, unknown>> = async ({
   });
 
   if (!result.success) {
+    const errorCode =
+      result.error === "Resend not configured"
+        ? "RESEND_NOT_CONFIGURED"
+        : "SEND_FAILED";
+
     // Best-effort: don't fail the whole rule run if notification can't be sent.
     logger.error("Cold email notification failed", {
-      senderEmail,
       error: result.error,
+      errorCode,
     });
+    logger.trace("Cold email notification failed sender", { senderEmail });
 
     captureException(
       new Error(result.error ?? "Cold email notification failed"),
@@ -395,8 +575,10 @@ const notify_sender: ActionFunction<Record<string, unknown>> = async ({
         sampleRate: 0.01,
       },
     );
-    return;
+    return { success: false, errorCode };
   }
+
+  return { success: true };
 };
 
 async function lazyUpdateActionLabelId({
@@ -467,4 +649,44 @@ async function lazyUpdateActionFolderId({
       error,
     });
   }
+}
+
+async function failMessagingAction({
+  actionId,
+  logger,
+  reason,
+}: {
+  actionId: string;
+  logger: Logger;
+  reason: string;
+}): Promise<never> {
+  try {
+    await prisma.executedAction.update({
+      where: { id: actionId },
+      data: {
+        messagingMessageStatus: MessagingMessageStatus.FAILED,
+      },
+    });
+  } catch (error) {
+    logger.warn("Failed to mark messaging action as failed", {
+      actionId,
+      error,
+    });
+  }
+
+  throw new Error(reason);
+}
+
+function isLegacyMessagingDraft({
+  executedRule,
+  messagingChannelId,
+}: {
+  executedRule: ExecutedRuleForAction;
+  messagingChannelId?: string | null;
+}) {
+  if (!messagingChannelId) return false;
+
+  return !executedRule.actionItems?.some((action) =>
+    isMessagingDraftActionType(action.type),
+  );
 }

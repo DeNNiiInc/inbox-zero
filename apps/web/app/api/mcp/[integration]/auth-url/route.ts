@@ -7,9 +7,9 @@ import {
   getMcpPkceCookieName,
   getMcpStateCookieName,
   getMcpOAuthStateType,
+  generateSignedOAuthState,
 } from "@/utils/oauth/state";
 import { getIntegration } from "@/utils/mcp/integrations";
-import { generateOAuthState } from "@/utils/oauth/state";
 import { generateOAuthUrl } from "@/utils/mcp/oauth";
 import { hasTierAccess } from "@/utils/premium";
 import prisma from "@/utils/prisma";
@@ -36,11 +36,11 @@ export const GET = withEmailAccount(
     if (
       !hasTierAccess({
         tier: user?.premium?.tier ?? null,
-        minimumTier: "BUSINESS_PLUS_MONTHLY",
+        minimumTier: "PLUS_MONTHLY",
       })
     ) {
       throw new SafeError(
-        "Integrations require a Professional plan. Please upgrade to continue.",
+        "Integrations require a Plus plan or higher. Please upgrade to continue.",
       );
     }
 
@@ -57,7 +57,7 @@ export const GET = withEmailAccount(
     try {
       const redirectUri = `${env.NEXT_PUBLIC_BASE_URL}/api/mcp/${integration}/callback`;
 
-      const state = generateOAuthState({
+      const state = generateSignedOAuthState({
         userId,
         emailAccountId,
         type: getMcpOAuthStateType(integration),

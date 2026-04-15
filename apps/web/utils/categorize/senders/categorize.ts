@@ -8,9 +8,9 @@ import type { Category } from "@/generated/prisma/client";
 import { getUserCategories } from "@/utils/category.server";
 import type { EmailAccountWithAI } from "@/utils/llms/types";
 import { createScopedLogger } from "@/utils/logger";
-import { extractEmailAddress } from "@/utils/email";
 import { SafeError } from "@/utils/error";
 import type { EmailProvider } from "@/utils/email/types";
+import { upsertSenderRecord } from "@/utils/senders/record";
 
 const logger = createScopedLogger("categorize/senders");
 
@@ -19,6 +19,7 @@ export async function categorizeSender(
   emailAccount: EmailAccountWithAI,
   provider: EmailProvider,
   userCategories?: Pick<Category, "id" | "name" | "description">[],
+  senderName?: string | null,
 ) {
   const categories =
     userCategories ||
@@ -37,23 +38,39 @@ export async function categorizeSender(
     categories,
   });
 
-  if (aiResult) {
-    const { newsletter } = await updateSenderCategory({
-      sender: senderAddress,
-      categories,
-      categoryName: aiResult.category,
-      emailAccountId: emailAccount.id,
-    });
+  const fallbackCategory = categories.find(
+    (category) => category.name === defaultCategory.OTHER.name,
+  );
+  const categoryName = aiResult?.category ?? fallbackCategory?.name;
 
-    return { categoryId: newsletter.categoryId };
+  if (!categoryName) {
+    logger.info(
+      "AI categorization abstained with no Other category available",
+      {
+        userEmail: emailAccount.email,
+        senderAddress,
+      },
+    );
+
+    return { categoryId: undefined };
   }
 
-  logger.error("No AI result for sender", {
-    userEmail: emailAccount.email,
-    senderAddress,
+  const { newsletter } = await updateSenderCategory({
+    sender: senderAddress,
+    senderName,
+    categories,
+    categoryName,
+    emailAccountId: emailAccount.id,
   });
 
-  return { categoryId: undefined };
+  if (!aiResult) {
+    logger.info("AI categorization abstained; defaulting sender to Other", {
+      userEmail: emailAccount.email,
+      senderAddress,
+    });
+  }
+
+  return { categoryId: newsletter.categoryId };
 }
 
 export async function updateSenderCategory({
@@ -85,19 +102,12 @@ export async function updateSenderCategory({
   }
 
   // save category
-  const newsletter = await prisma.newsletter.upsert({
-    where: {
-      email_emailAccountId: { email: sender, emailAccountId },
-    },
-    update: {
+  const newsletter = await upsertSenderRecord({
+    emailAccountId,
+    newsletterEmail: sender,
+    changes: {
       categoryId: category.id,
       ...(senderName && { name: senderName }),
-    },
-    create: {
-      email: sender,
-      name: senderName,
-      emailAccountId,
-      categoryId: category.id,
     },
   });
 
@@ -118,16 +128,12 @@ export async function updateCategoryForSender({
   senderName?: string | null;
   categoryId: string;
 }) {
-  const email = extractEmailAddress(sender);
-
-  await prisma.newsletter.upsert({
-    where: { email_emailAccountId: { email, emailAccountId } },
-    update: { categoryId, ...(senderName && { name: senderName }) },
-    create: {
-      email,
-      name: senderName,
-      emailAccountId,
+  await upsertSenderRecord({
+    emailAccountId,
+    newsletterEmail: sender,
+    changes: {
       categoryId,
+      ...(senderName && { name: senderName }),
     },
   });
 }

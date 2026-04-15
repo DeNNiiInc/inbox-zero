@@ -7,17 +7,17 @@ import { Placeholder } from "@tiptap/extension-placeholder";
 import { useImperativeHandle, forwardRef } from "react";
 import { cn } from "@/utils";
 import { createLabelMentionExtension } from "./extensions/LabelMention";
-import type { EmailLabel } from "@/providers/EmailProvider";
+import type { EmailLabel } from "@/providers/email-label-types";
 import "./SimpleRichTextEditor.css";
 
 interface SimpleRichTextEditorProps {
-  placeholder?: string;
   className?: string;
   defaultValue?: string;
-  minHeight?: number;
-  userLabels?: EmailLabel[];
-  onClearContents?: () => void;
   editable?: boolean;
+  minHeight?: number;
+  onClearContents?: () => void;
+  placeholder?: string;
+  userLabels?: EmailLabel[];
 }
 
 export interface SimpleRichTextEditorRef {

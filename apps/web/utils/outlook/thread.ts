@@ -58,7 +58,7 @@ export async function getThreads(
   nextPageToken?: string | null;
   threads: { id: string; snippet: string }[];
 }> {
-  let request = client.api("/messages");
+  let request = client.getClient().api("/me/messages");
 
   if (query) {
     request = request.filter(
@@ -106,11 +106,9 @@ export async function getThreadsWithNextPageToken({
   pageToken?: string;
   logger: Logger;
 }) {
-  let request = pageToken
-    ? client.getClient().api(pageToken)
-    : client.api("/messages");
-  
-  request = request
+  let request = client
+    .getClient()
+    .api(pageToken || "/me/messages")
     .top(maxResults)
     .select("id,conversationId,subject,bodyPreview");
 
@@ -149,7 +147,8 @@ export async function getThreadsFromSender(
   const response: { value: Message[] } = await withOutlookRetry(
     () =>
       client
-        .api("/messages")
+        .getClient()
+        .api("/me/messages")
         .filter(`from/emailAddress/address eq '${escapeODataString(sender)}'`)
         .top(limit)
         .select("id,conversationId,bodyPreview")
@@ -180,7 +179,8 @@ export async function getThreadsFromSenderWithSubject(
   const response: { value: Message[] } = await withOutlookRetry(
     () =>
       client
-        .api("/messages")
+        .getClient()
+        .api("/me/messages")
         .filter(`from/emailAddress/address eq '${escapeODataString(sender)}'`)
         .top(limit)
         .select("id,conversationId,subject,bodyPreview")
@@ -213,7 +213,7 @@ export async function getThreadMessages(
 ): Promise<ParsedMessage[]> {
   const [messages, folderIds, categoryMap] = await Promise.all([
     getThread(threadId, client, logger),
-    getFolderIds(client, logger),
+    getFolderIds(client, logger, { includeDrafts: false }),
     getCategoryMap(client, logger),
   ]);
 

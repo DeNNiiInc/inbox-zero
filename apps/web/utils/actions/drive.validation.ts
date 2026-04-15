@@ -15,6 +15,10 @@ export const updateFilingEnabledBody = z.object({
 });
 export type UpdateFilingEnabledBody = z.infer<typeof updateFilingEnabledBody>;
 
+export const updateFilingConfirmationEmailBody = z.object({
+  sendEmail: z.boolean(),
+});
+
 const filingFolderSchema = z.object({
   folderId: z.string(),
   folderName: z.string(),
@@ -34,6 +38,13 @@ export const removeFilingFolderBody = z.object({
   folderId: z.string(),
 });
 export type RemoveFilingFolderBody = z.infer<typeof removeFilingFolderBody>;
+
+export const cleanupStaleFilingFoldersBody = z.object({
+  filingFolderIds: z.array(z.string()).min(1),
+});
+export type CleanupStaleFilingFoldersBody = z.infer<
+  typeof cleanupStaleFilingFoldersBody
+>;
 
 export const submitPreviewFeedbackBody = z.object({
   filingId: z.string(),
@@ -61,3 +72,7 @@ export const fileAttachmentBody = z.object({
   filename: z.string(),
 });
 export type FileAttachmentBody = z.infer<typeof fileAttachmentBody>;
+
+export const getDriveSourceChildrenQuerySchema = z.object({
+  driveConnectionId: z.string(),
+});

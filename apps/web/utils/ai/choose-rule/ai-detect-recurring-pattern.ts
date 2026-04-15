@@ -13,7 +13,7 @@ import {
 // const braintrust = new Braintrust("recurring-pattern-detection");
 
 const schema = z.object({
-  matchedRule: z.string().nullish(),
+  matchedRule: z.string().nullable(),
   explanation: z.string(),
 });
 export type DetectPatternResult = z.infer<typeof schema>;
@@ -100,6 +100,7 @@ ${getEmailListPrompt({ messages: emails, messageMaxLength: 500 })}
       emailAccount,
       label: "Detect recurring pattern",
       modelOptions,
+      promptHardening: { trust: "untrusted", level: "compact" },
     });
 
     const aiResponse = await generateObject({
