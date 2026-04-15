@@ -2,7 +2,7 @@
 # Clones the private marketing repository into the Next.js route group folder
 # Only runs when GITHUB_MARKETING_TOKEN is present (i.e. on Vercel prod builds)
 # Safe for local contributors :)
-set -eu
+set -e -u
 
 MARKETING_DIR="apps/web/app/(marketing)"
 REPO_URL="github.com/inbox-zero/marketing.git"
