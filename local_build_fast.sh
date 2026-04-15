@@ -18,6 +18,9 @@ echo "Git version: $GIT_COMMIT_SHORT ($GIT_COMMIT_DATE)"
 echo "Copying source..."
 rsync -a --exclude 'node_modules' --exclude 'apps/web/node_modules' --exclude '.next' --exclude 'apps/web/.next' --exclude '.git' . "$BUILD_DIR/"
 
+# Strip Windows carriage returns from shell scripts (CRLF -> LF)
+find "$BUILD_DIR" -name '*.sh' -exec sed -i 's/\r$//' {} +
+
 echo "Starting build in $BUILD_DIR..."
 cd "$BUILD_DIR"
 bash local_build.sh
