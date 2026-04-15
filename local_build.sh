@@ -59,7 +59,8 @@ fi
 
 # 5. Build
 echo "Building application..."
-# We need to ensure we don't have memory issues locally either.
+# Skip TypeScript checking during build to avoid OOM in constrained environments
+export SKIP_TYPE_CHECK=true
 pnpm build
 
 # 6. Package
