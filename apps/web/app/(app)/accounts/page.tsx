@@ -134,7 +134,14 @@ function AccountHeader({
       </Avatar>
       <div className="flex flex-col space-y-1.5 flex-1">
         <CardTitle>{emailAccount.name}</CardTitle>
-        <CardDescription>{emailAccount.email}</CardDescription>
+        <CardDescription>
+          {emailAccount.email}
+          {emailAccount.mailboxAddress && emailAccount.mailboxAddress !== "me" && (
+            <span className="mt-1 block text-xs text-muted-foreground font-medium">
+              Shared Mailbox: {emailAccount.mailboxAddress}
+            </span>
+          )}
+        </CardDescription>
       </div>
       <div
         onClick={(e) => e.stopPropagation()}
