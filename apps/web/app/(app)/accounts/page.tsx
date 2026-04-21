@@ -170,25 +170,28 @@ function AccountOptionsDropdown({
   const [isMailboxDialogOpen, setIsMailboxDialogOpen] = useState(false);
   const [mailboxAddress, setMailboxAddress] = useState(emailAccount.mailboxAddress || "me");
 
-  const { execute: executeUpdateMailbox, isExecuting: isUpdatingMailbox } = useAction(updateMailboxAddressAction, {
-    onSuccess: () => {
-      toastSuccess({
-        title: "Mailbox Address Updated",
-        description: "The shared mailbox address has been saved.",
-      });
-      setIsMailboxDialogOpen(false);
-      onAccountDeleted(); // triggers mutate
-    },
-    onError: (error) => {
-      toastError({
-        title: "Error updating address",
-        description: getActionErrorMessage(error.error),
-      });
-    },
-  });
+  const { execute: executeUpdateMailbox, isExecuting: isUpdatingMailbox } = useAction(
+    updateMailboxAddressAction.bind(null, emailAccount.id), 
+    {
+      onSuccess: () => {
+        toastSuccess({
+          title: "Mailbox Address Updated",
+          description: "The shared mailbox address has been saved.",
+        });
+        setIsMailboxDialogOpen(false);
+        onAccountDeleted(); // triggers mutate
+      },
+      onError: (error) => {
+        toastError({
+          title: "Error updating address",
+          description: getActionErrorMessage(error.error),
+        });
+      },
+    }
+  );
 
   const handleUpdateMailbox = () => {
-    executeUpdateMailbox({ emailAccountId: emailAccount.id, mailboxAddress: mailboxAddress || "me" });
+    executeUpdateMailbox({ mailboxAddress: mailboxAddress || "me" });
   };
 
   const { execute, isExecuting } = useAction(deleteEmailAccountAction, {
