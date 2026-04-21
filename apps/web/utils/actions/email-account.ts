@@ -168,8 +168,8 @@ export const addSharedMailboxAction = actionClient
         throw new SafeError("Parent email account not found");
       }
 
-      if (parentEmailAccount.account.provider !== "outlook") {
-        throw new SafeError("Only Outlook accounts support shared mailboxes");
+      if (parentEmailAccount.account.provider !== "outlook" && parentEmailAccount.account.provider !== "microsoft") {
+        throw new SafeError("Only Outlook/Microsoft accounts support shared mailboxes");
       }
 
       const parentAccount = parentEmailAccount.account;
