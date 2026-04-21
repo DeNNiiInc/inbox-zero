@@ -49,7 +49,7 @@ export const OUTLOOK_COLOR_MAP = {
 export async function getLabels(client: OutlookClient) {
   const response: { value: OutlookCategory[] } = await client
     .getClient()
-    .api("/me/outlook/masterCategories")
+    .api(client.getUserPath() + "/outlook/masterCategories")
     .get();
   return response.value.map((label) => ({
     ...label,
@@ -64,7 +64,7 @@ export async function getLabelById(options: {
   const { client, id } = options;
   const response: OutlookCategory = await client
     .getClient()
-    .api(`/me/outlook/masterCategories/${id}`)
+    .api(`${client.getUserPath()}/outlook/masterCategories/${id}`)
     .get();
   return response;
 }
@@ -92,7 +92,7 @@ export async function createLabel({
 
     const response: OutlookCategory = await withOutlookRetry(
       () =>
-        client.getClient().api("/me/outlook/masterCategories").post({
+        client.getClient().api(client.getUserPath() + "/outlook/masterCategories").post({
           displayName: sanitizedName,
           color: outlookColor,
         }),
@@ -237,7 +237,7 @@ export async function labelMessage({
 }) {
   return withOutlookRetry(
     () =>
-      client.getClient().api(`/me/messages/${messageId}`).patch({
+      client.getClient().api(`${client.getUserPath()}/messages/${messageId}`).patch({
         categories,
       }),
     logger,
@@ -260,7 +260,7 @@ export async function labelThread({
   const escapedThreadId = threadId.replace(/'/g, "''");
   const messages: { value: Message[] } = await client
     .getClient()
-    .api("/me/messages")
+    .api(client.getUserPath() + "/messages")
     .filter(`conversationId eq '${escapedThreadId}'`)
     .get();
 
@@ -297,7 +297,7 @@ export async function removeThreadLabel({
   const escapedThreadId = threadId.replace(/'/g, "''");
   const messages = await client
     .getClient()
-    .api("/me/messages")
+    .api(client.getUserPath() + "/messages")
     .filter(`conversationId eq '${escapedThreadId}'`)
     .select("id,categories")
     .get();
@@ -326,7 +326,7 @@ export async function removeThreadLabel({
 
       await withOutlookRetry(
         () =>
-          client.getClient().api(`/me/messages/${messageId}`).patch({
+          client.getClient().api(`${client.getUserPath()}/messages/${messageId}`).patch({
             categories: updatedCategories,
           }),
         logger,
@@ -365,7 +365,7 @@ export async function archiveThread({
   const wellKnownFolders = Object.keys(WELL_KNOWN_FOLDERS);
   if (!wellKnownFolders.includes(folderId.toLowerCase())) {
     try {
-      await client.getClient().api(`/me/mailFolders/${folderId}`).get();
+      await client.getClient().api(`${client.getUserPath()}/mailFolders/${folderId}`).get();
     } catch (error) {
       logger.warn(
         "Custom destination folder not found, skipping archive operation",
@@ -385,7 +385,7 @@ export async function archiveThread({
     const escapedThreadId = threadId.replace(/'/g, "''");
     const messages = await client
       .getClient()
-      .api("/me/messages")
+      .api(client.getUserPath() + "/messages")
       .filter(`conversationId eq '${escapedThreadId}'`) // Escape single quotes in threadId for the filter
       .get();
 
@@ -396,7 +396,7 @@ export async function archiveThread({
       messageHandler: (messageId) =>
         withOutlookRetry(
           () =>
-            client.getClient().api(`/me/messages/${messageId}/move`).post({
+            client.getClient().api(`${client.getUserPath()}/messages/${messageId}/move`).post({
               destinationId: folderId,
             }),
           logger,
@@ -459,7 +459,7 @@ export async function archiveThread({
             () =>
               client
                 .getClient()
-                .api(`/me/messages/${messageId}/move`)
+                .api(`${client.getUserPath()}/messages/${messageId}/move`)
                 .post({ destinationId: folderId }),
             logger,
           ),
@@ -513,7 +513,7 @@ export async function markReadThread({
     const escapedThreadId = threadId.replace(/'/g, "''");
     const messages = await client
       .getClient()
-      .api("/me/messages")
+      .api(client.getUserPath() + "/messages")
       .filter(`conversationId eq '${escapedThreadId}'`)
       .get();
 
@@ -525,7 +525,7 @@ export async function markReadThread({
       messageHandler: (messageId) =>
         withOutlookRetry(
           () =>
-            client.getClient().api(`/me/messages/${messageId}`).patch({
+            client.getClient().api(`${client.getUserPath()}/messages/${messageId}`).patch({
               isRead: read,
             }),
           logger,
@@ -549,7 +549,7 @@ export async function markReadThread({
             () =>
               client
                 .getClient()
-                .api(`/me/messages/${messageId}`)
+                .api(`${client.getUserPath()}/messages/${messageId}`)
                 .patch({ isRead: read }),
             logger,
           ),
@@ -582,7 +582,7 @@ export async function markImportantMessage({
     () =>
       client
         .getClient()
-        .api(`/me/messages/${messageId}`)
+        .api(`${client.getUserPath()}/messages/${messageId}`)
         .patch({
           importance: important ? "high" : "normal",
         }),

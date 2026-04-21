@@ -20,12 +20,14 @@ export class OutlookClient {
   private readonly client: Client;
   private readonly accessToken: string;
   private readonly logger: Logger;
+  private readonly mailboxAddress: string;
   private folderIdCache: Record<string, string> | null = null;
   private categoryMapCache: Map<string, string> | null = null;
 
-  constructor(accessToken: string, logger: Logger) {
+  constructor(accessToken: string, logger: Logger, mailboxAddress: string = "me") {
     this.accessToken = accessToken;
     this.logger = logger;
+    this.mailboxAddress = mailboxAddress || "me";
     const graphClientOptions = getMicrosoftGraphClientOptions(accessToken);
     this.client = Client.init({
       authProvider: (done) => {
@@ -72,17 +74,21 @@ export class OutlookClient {
     this.categoryMapCache = null;
   }
 
+  public getUserPath(): string {
+    return this.mailboxAddress === "me" ? "/me" : `/users/${this.mailboxAddress}`;
+  }
+
   // Helper methods for common operations
   async getUserProfile(): Promise<User> {
     return await this.client
-      .api("/me")
+      .api(this.getUserPath())
       .select("id,displayName,mail,userPrincipalName")
       .get();
   }
 
   async getUserPhoto(): Promise<string | null> {
     try {
-      const photoResponse = await this.client.api("/me/photo/$value").get();
+      const photoResponse = await this.client.api(`${this.getUserPath()}/photo/$value`).get();
 
       if (photoResponse) {
         const arrayBuffer = await photoResponse.arrayBuffer();
@@ -98,9 +104,9 @@ export class OutlookClient {
 }
 
 // Helper to create OutlookClient instance
-export const createOutlookClient = (accessToken: string, logger: Logger) => {
+export const createOutlookClient = (accessToken: string, logger: Logger, mailboxAddress?: string) => {
   if (!accessToken) throw new SafeError("No access token provided");
-  return new OutlookClient(accessToken, logger);
+  return new OutlookClient(accessToken, logger, mailboxAddress);
 };
 
 // Similar to Gmail's getGmailClientWithRefresh
@@ -110,11 +116,13 @@ export const getOutlookClientWithRefresh = async ({
   expiresAt,
   emailAccountId,
   logger,
+  mailboxAddress,
 }: {
   accessToken?: string | null;
   refreshToken: string | null;
   expiresAt: number | null;
   emailAccountId: string;
+  mailboxAddress?: string | null;
   logger: Logger;
 }): Promise<OutlookClient> => {
   if (!refreshToken) {
@@ -129,7 +137,7 @@ export const getOutlookClientWithRefresh = async ({
     expiryDate &&
     expiryDate > Date.now() + TOKEN_REFRESH_BUFFER_MS
   ) {
-    return createOutlookClient(accessToken, logger);
+    return createOutlookClient(accessToken, logger, mailboxAddress ?? "me");
   }
 
   // Refresh token
@@ -225,7 +233,7 @@ export const getOutlookClientWithRefresh = async ({
       provider: "microsoft",
     });
 
-    return createOutlookClient(tokens.access_token, logger);
+    return createOutlookClient(tokens.access_token, logger, mailboxAddress ?? "me");
   } catch (error) {
     const isInvalidGrantError =
       error instanceof Error &&

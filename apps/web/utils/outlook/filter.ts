@@ -39,7 +39,7 @@ export async function createFilter(options: {
 
     const response: MessageRule = await withOutlookRetry(
       () =>
-        client.getClient().api("/me/mailFolders/inbox/messageRules").post(rule),
+        client.getClient().api(client.getUserPath() + "/mailFolders/inbox/messageRules").post(rule),
       logger,
     );
 
@@ -82,7 +82,7 @@ export async function createAutoArchiveFilter({
 
     const response: MessageRule = await withOutlookRetry(
       () =>
-        client.getClient().api("/me/mailFolders/inbox/messageRules").post(rule),
+        client.getClient().api(client.getUserPath() + "/mailFolders/inbox/messageRules").post(rule),
       logger,
     );
 
@@ -110,7 +110,7 @@ export async function deleteFilter({
       () =>
         client
           .getClient()
-          .api(`/me/mailFolders/inbox/messageRules/${id}`)
+          .api(`${client.getUserPath()}/mailFolders/inbox/messageRules/${id}`)
           .delete(),
       logger,
     );
@@ -132,7 +132,7 @@ export async function getFiltersList({
   try {
     const response: { value: MessageRule[] } = await client
       .getClient()
-      .api("/me/mailFolders/inbox/messageRules")
+      .api(client.getUserPath() + "/mailFolders/inbox/messageRules")
       .get();
 
     return response;
@@ -219,7 +219,7 @@ export async function updateFilter({
       () =>
         client
           .getClient()
-          .api(`/me/mailFolders/inbox/messageRules/${id}`)
+          .api(`${client.getUserPath()}/mailFolders/inbox/messageRules/${id}`)
           .patch(rule),
       logger,
     );

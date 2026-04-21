@@ -68,7 +68,7 @@ export async function processThreadMessagesFallback({
 }) {
   const messages = await client
     .getClient()
-    .api("/me/messages")
+    .api(client.getUserPath() + "/messages")
     .select("id,conversationId")
     .get();
 

@@ -27,6 +27,7 @@ async function getEmailAccounts({ userId }: { userId: string }) {
       accountId: true,
       name: true,
       image: true,
+      mailboxAddress: true,
       account: {
         select: {
           provider: true,

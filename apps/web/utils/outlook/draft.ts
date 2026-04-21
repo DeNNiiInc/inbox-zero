@@ -24,7 +24,7 @@ export async function getDraft({
         () =>
           client
             .getClient()
-            .api(`/me/messages/${draftId}`)
+            .api(`${client.getUserPath()}/messages/${draftId}`)
             .get() as Promise<Message>,
         logger,
       ),
@@ -68,7 +68,7 @@ export async function sendDraft({
   // Send the draft - this moves it from Drafts to Sent Items
   // The message ID stays the same after sending
   await withOutlookRetry(
-    () => client.getClient().api(`/me/messages/${draftId}/send`).post({}),
+    () => client.getClient().api(`${client.getUserPath()}/messages/${draftId}/send`).post({}),
     logger,
   );
 
@@ -77,7 +77,7 @@ export async function sendDraft({
     () =>
       client
         .getClient()
-        .api(`/me/messages/${draftId}`)
+        .api(`${client.getUserPath()}/messages/${draftId}`)
         .get() as Promise<Message>,
     logger,
   );
@@ -111,7 +111,7 @@ export async function deleteDraft({
     // DELETE moves the draft to Deleted Items folder (not permanently deleted)
     // This is fine - getDraft() treats drafts not in Drafts folder as "deleted"
     await withOutlookRetry(
-      () => client.getClient().api(`/me/messages/${draftId}`).delete(),
+      () => client.getClient().api(`${client.getUserPath()}/messages/${draftId}`).delete(),
       logger,
     );
 

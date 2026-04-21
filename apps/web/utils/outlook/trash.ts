@@ -23,7 +23,7 @@ export async function trashThread(options: {
     const escapedThreadId = threadId.replace(/'/g, "''");
     const messages = await client
       .getClient()
-      .api("/me/messages")
+      .api(client.getUserPath() + "/messages")
       .filter(`conversationId eq '${escapedThreadId}'`)
       .get();
 
@@ -34,7 +34,7 @@ export async function trashThread(options: {
         try {
           return await withOutlookRetry(
             () =>
-              client.getClient().api(`/me/messages/${messageId}/move`).post({
+              client.getClient().api(`${client.getUserPath()}/messages/${messageId}/move`).post({
                 destinationId: "deleteditems",
               }),
             logger,
@@ -108,7 +108,7 @@ export async function trashThread(options: {
             () =>
               client
                 .getClient()
-                .api(`/me/messages/${messageId}/move`)
+                .api(`${client.getUserPath()}/messages/${messageId}/move`)
                 .post({ destinationId: "deleteditems" }),
             logger,
           ),

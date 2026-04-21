@@ -147,7 +147,7 @@ export async function fetchMicrosoftCalendars(
 > {
   try {
     const response = await calendarClient
-      .api("/me/calendars")
+      .api(client.getUserPath() + "/calendars")
       .select("id,name,color,isDefaultCalendar,canEdit,owner")
       .get();
 

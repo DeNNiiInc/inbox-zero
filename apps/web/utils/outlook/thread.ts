@@ -58,7 +58,7 @@ export async function getThreads(
   nextPageToken?: string | null;
   threads: { id: string; snippet: string }[];
 }> {
-  let request = client.getClient().api("/me/messages");
+  let request = client.getClient().api(client.getUserPath() + "/messages");
 
   if (query) {
     request = request.filter(
@@ -148,7 +148,7 @@ export async function getThreadsFromSender(
     () =>
       client
         .getClient()
-        .api("/me/messages")
+        .api(client.getUserPath() + "/messages")
         .filter(`from/emailAddress/address eq '${escapeODataString(sender)}'`)
         .top(limit)
         .select("id,conversationId,bodyPreview")
@@ -180,7 +180,7 @@ export async function getThreadsFromSenderWithSubject(
     () =>
       client
         .getClient()
-        .api("/me/messages")
+        .api(client.getUserPath() + "/messages")
         .filter(`from/emailAddress/address eq '${escapeODataString(sender)}'`)
         .top(limit)
         .select("id,conversationId,subject,bodyPreview")

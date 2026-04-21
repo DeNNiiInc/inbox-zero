@@ -50,7 +50,7 @@ export async function getFolderIds(
         () =>
           client
             .getClient()
-            .api(`/me/mailFolders/${folderName}`)
+            .api(`${client.getUserPath()}/mailFolders/${folderName}`)
             .select("id")
             .get(),
         logger,
@@ -87,7 +87,7 @@ export async function getCategoryMap(
   try {
     const response: { value: Array<{ id?: string; displayName?: string }> } =
       await withOutlookRetry(
-        () => client.getClient().api("/me/outlook/masterCategories").get(),
+        () => client.getClient().api(client.getUserPath() + "/outlook/masterCategories").get(),
         logger,
       );
 
@@ -716,7 +716,7 @@ export async function getMessages(
 export function createMessagesRequest(client: OutlookClient) {
   return client
     .getClient()
-    .api("/me/messages")
+    .api(client.getUserPath() + "/messages")
     .select(MESSAGE_SELECT_FIELDS)
     .expand(MESSAGE_EXPAND_ATTACHMENTS);
 }
@@ -727,7 +727,7 @@ export function createMessagesRequest(client: OutlookClient) {
 export function createMessageRequest(client: OutlookClient, messageId: string) {
   return client
     .getClient()
-    .api(`/me/messages/${messageId}`)
+    .api(`${client.getUserPath()}/messages/${messageId}`)
     .select(MESSAGE_SELECT_FIELDS)
     .expand(MESSAGE_EXPAND_ATTACHMENTS);
 }

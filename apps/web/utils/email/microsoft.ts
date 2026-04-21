@@ -189,7 +189,7 @@ export class OutlookProvider implements EmailProvider {
 
     const response = await this.client
       .getClient()
-      .api("/me/messages")
+      .api(this.client.getUserPath() + "/messages")
       .filter(
         `internetMessageId eq '${escapeODataString(messageIdWithBrackets)}'`,
       )
@@ -255,7 +255,7 @@ export class OutlookProvider implements EmailProvider {
       () =>
         this.client
           .getClient()
-          .api("/me/mailFolders('sentitems')/messages")
+          .api(this.client.getUserPath() + "/mailFolders('sentitems')/messages")
           .select(MESSAGE_SELECT_FIELDS)
           .top(maxResults)
           .orderby("sentDateTime desc")
@@ -277,7 +277,7 @@ export class OutlookProvider implements EmailProvider {
       () =>
         this.client
           .getClient()
-          .api("/me/mailFolders('inbox')/messages")
+          .api(this.client.getUserPath() + "/mailFolders('inbox')/messages")
           .select(MESSAGE_SELECT_FIELDS)
           .top(maxResults)
           .orderby("receivedDateTime desc")
@@ -307,7 +307,7 @@ export class OutlookProvider implements EmailProvider {
 
     let request = this.client
       .getClient()
-      .api("/me/mailFolders('sentitems')/messages")
+      .api(this.client.getUserPath() + "/mailFolders('sentitems')/messages")
       .select("id,conversationId")
       .top(maxResults)
       .orderby("sentDateTime desc");
@@ -364,7 +364,7 @@ export class OutlookProvider implements EmailProvider {
 
     // Get messages from Microsoft Graph API (well-known Sent Items folder)
     let request = client
-      .api("/me/mailFolders('sentitems')/messages")
+      .api(this.client.getUserPath() + "/mailFolders('sentitems')/messages")
       .select(MESSAGE_SELECT_FIELDS)
       .top(maxResults)
       .orderby("sentDateTime desc");
@@ -480,7 +480,7 @@ export class OutlookProvider implements EmailProvider {
       () =>
         this.client
           .getClient()
-          .api(`/me/messages/${messageId}`)
+          .api(`${this.client.getUserPath()}/messages/${messageId}`)
           .select("categories")
           .get(),
       this.logger,
@@ -540,7 +540,7 @@ export class OutlookProvider implements EmailProvider {
         () =>
           this.client
             .getClient()
-            .api(`/me/messages/${params.replyToMessageId}/createReply`)
+            .api(`${this.client.getUserPath()}/messages/${params.replyToMessageId}/createReply`)
             .post({}),
         this.logger,
       );
@@ -550,7 +550,7 @@ export class OutlookProvider implements EmailProvider {
         () =>
           this.client
             .getClient()
-            .api(`/me/messages/${draft.id}`)
+            .api(`${this.client.getUserPath()}/messages/${draft.id}`)
             .patch({
               body: { contentType: "html", content: params.messageHtml },
               subject: params.subject,
@@ -568,7 +568,7 @@ export class OutlookProvider implements EmailProvider {
       () =>
         this.client
           .getClient()
-          .api("/me/messages")
+          .api(this.client.getUserPath() + "/messages")
           .post({
             subject: params.subject,
             body: { contentType: "html", content: params.messageHtml },
@@ -599,7 +599,7 @@ export class OutlookProvider implements EmailProvider {
     }
 
     await withOutlookRetry(
-      () => this.client.getClient().api(`/me/messages/${draftId}`).patch(body),
+      () => this.client.getClient().api(`${this.client.getUserPath()}/messages/${draftId}`).patch(body),
       this.logger,
     );
 
@@ -734,7 +734,7 @@ export class OutlookProvider implements EmailProvider {
   }
 
   async markReadMessage(messageId: string): Promise<void> {
-    await this.client.getClient().api(`/me/messages/${messageId}`).patch({
+    await this.client.getClient().api(`${this.client.getUserPath()}/messages/${messageId}`).patch({
       isRead: true,
     });
   }
@@ -780,7 +780,7 @@ export class OutlookProvider implements EmailProvider {
       const escapedThreadId = escapeODataString(threadId);
 
       const response = await client
-        .api("/me/messages")
+        .api(this.client.getUserPath() + "/messages")
         .filter(
           `conversationId eq '${escapedThreadId}' and parentFolderId eq '${escapeODataString(inboxFolderId)}'`,
         )
@@ -869,7 +869,7 @@ export class OutlookProvider implements EmailProvider {
       this.getLabels(),
       this.client
         .getClient()
-        .api("/me/messages")
+        .api(this.client.getUserPath() + "/messages")
         .filter(`conversationId eq '${escapeODataString(threadId)}'`)
         .select("id,categories")
         .get() as Promise<{
@@ -918,7 +918,7 @@ export class OutlookProvider implements EmailProvider {
   async deleteLabel(labelId: string): Promise<void> {
     await this.client
       .getClient()
-      .api(`/me/outlook/masterCategories/${labelId}`)
+      .api(`${this.client.getUserPath()}/outlook/masterCategories/${labelId}`)
       .delete();
   }
 
@@ -1271,7 +1271,7 @@ export class OutlookProvider implements EmailProvider {
 
     const response = await this.client
       .getClient()
-      .api("/me/messages")
+      .api(this.client.getUserPath() + "/messages")
       .filter(filter)
       .select(MESSAGE_SELECT_FIELDS)
       .top(maxResults)
@@ -1313,7 +1313,7 @@ export class OutlookProvider implements EmailProvider {
     const escapedThreadId = escapeODataString(threadId);
     const response = await this.client
       .getClient()
-      .api("/me/messages")
+      .api(this.client.getUserPath() + "/messages")
       .filter(`conversationId eq '${escapedThreadId}'`)
       .select(MESSAGE_SELECT_FIELDS)
       .get();
@@ -1335,7 +1335,7 @@ export class OutlookProvider implements EmailProvider {
   async getDrafts(options?: { maxResults?: number }): Promise<ParsedMessage[]> {
     const response: { value: Message[] } = await this.client
       .getClient()
-      .api("/me/mailFolders/drafts/messages")
+      .api(this.client.getUserPath() + "/mailFolders/drafts/messages")
       .select(MESSAGE_SELECT_FIELDS)
       .top(options?.maxResults || 50)
       .get();
@@ -1690,7 +1690,7 @@ export class OutlookProvider implements EmailProvider {
         const [sentResponse, receivedResponse] = await Promise.all([
           this.client
             .getClient()
-            .api("/me/messages")
+            .api(this.client.getUserPath() + "/messages")
             .search(`"to:@${escapedKqlDomain}"`)
             .top(5)
             .select("id,sentDateTime")
@@ -1704,7 +1704,7 @@ export class OutlookProvider implements EmailProvider {
 
           this.client
             .getClient()
-            .api("/me/messages")
+            .api(this.client.getUserPath() + "/messages")
             .search(`"from:@${escapedKqlDomain}"`)
             .top(5)
             .select("id,receivedDateTime")
@@ -1749,7 +1749,7 @@ export class OutlookProvider implements EmailProvider {
       const [sentResponse, receivedResponse] = await Promise.all([
         this.client
           .getClient()
-          .api("/me/messages")
+          .api(this.client.getUserPath() + "/messages")
           .search(sentSearch)
           .top(5) // Increase top to account for potential future messages we filter out
           .select("id,sentDateTime")
@@ -1764,7 +1764,7 @@ export class OutlookProvider implements EmailProvider {
 
         this.client
           .getClient()
-          .api("/me/messages")
+          .api(this.client.getUserPath() + "/messages")
           .filter(receivedFilter)
           .top(2)
           .select("id")
@@ -1873,7 +1873,7 @@ export class OutlookProvider implements EmailProvider {
 
   async archiveMessage(messageId: string): Promise<void> {
     try {
-      await this.client.getClient().api(`/me/messages/${messageId}/move`).post({
+      await this.client.getClient().api(`${this.client.getUserPath()}/messages/${messageId}/move`).post({
         destinationId: "archive",
       });
 
@@ -1990,7 +1990,7 @@ export class OutlookProvider implements EmailProvider {
       () =>
         this.client
           .getClient()
-          .api("/me/mailFolders('inbox')")
+          .api(this.client.getUserPath() + "/mailFolders('inbox')")
           .select("totalItemCount,unreadItemCount")
           .get(),
       this.logger,

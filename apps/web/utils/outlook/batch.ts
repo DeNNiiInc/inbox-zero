@@ -250,7 +250,7 @@ export async function moveMessagesForSenders({
       // First page: use fluent API
       return client
         .getClient()
-        .api("/me/messages")
+        .api(client.getUserPath() + "/messages")
         .filter(filterExpression)
         .top(100)
         .select("id,conversationId")

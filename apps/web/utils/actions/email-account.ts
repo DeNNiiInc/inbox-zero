@@ -12,6 +12,7 @@ import { updateContactRole } from "@inboxzero/loops";
 import {
   updateHiddenAiDraftLinksBody,
   updateReferralSignatureBody,
+  updateMailboxAddressBody,
 } from "@/utils/actions/email-account.validation";
 import { z } from "zod";
 
@@ -143,3 +144,20 @@ export const fetchSignaturesFromProviderAction = actionClient
 
     return { signatures };
   });
+
+export const updateMailboxAddressAction = actionClient
+  .metadata({ name: "updateMailboxAddress" })
+  .inputSchema(updateMailboxAddressBody)
+  .action(
+    async ({
+      ctx: { emailAccountId, logger },
+      parsedInput: { mailboxAddress },
+    }) => {
+      logger.info("Updating mailbox address", { mailboxAddress });
+
+      await prisma.emailAccount.update({
+        where: { id: emailAccountId },
+        data: { mailboxAddress: mailboxAddress || "me" },
+      });
+    },
+  );

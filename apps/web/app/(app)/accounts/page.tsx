@@ -22,8 +22,19 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useAccounts } from "@/hooks/useAccounts";
 import { deleteEmailAccountAction } from "@/utils/actions/user";
+import { updateMailboxAddressAction } from "@/utils/actions/email-account";
 import { toastSuccess, toastError } from "@/components/Toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { prefixPath } from "@/utils/path";
@@ -81,6 +92,8 @@ function AccountItem({
     email: string;
     image: string | null;
     isPrimary: boolean;
+    mailboxAddress?: string | null;
+    account?: { provider: string };
   };
   onAccountDeleted: () => void;
 }) {
@@ -106,6 +119,8 @@ function AccountHeader({
     email: string;
     image: string | null;
     isPrimary: boolean;
+    mailboxAddress?: string | null;
+    account?: { provider: string };
   };
   onAccountDeleted: () => void;
 }) {
@@ -147,9 +162,35 @@ function AccountOptionsDropdown({
     id: string;
     email: string;
     isPrimary: boolean;
+    mailboxAddress?: string | null;
+    account?: { provider: string };
   };
   onAccountDeleted: () => void;
 }) {
+  const [isMailboxDialogOpen, setIsMailboxDialogOpen] = useState(false);
+  const [mailboxAddress, setMailboxAddress] = useState(emailAccount.mailboxAddress || "me");
+
+  const { execute: executeUpdateMailbox, isExecuting: isUpdatingMailbox } = useAction(updateMailboxAddressAction, {
+    onSuccess: () => {
+      toastSuccess({
+        title: "Mailbox Address Updated",
+        description: "The shared mailbox address has been saved.",
+      });
+      setIsMailboxDialogOpen(false);
+      onAccountDeleted(); // triggers mutate
+    },
+    onError: (error) => {
+      toastError({
+        title: "Error updating address",
+        description: getActionErrorMessage(error.error),
+      });
+    },
+  });
+
+  const handleUpdateMailbox = () => {
+    executeUpdateMailbox({ emailAccountId: emailAccount.id, mailboxAddress: mailboxAddress || "me" });
+  };
+
   const { execute, isExecuting } = useAction(deleteEmailAccountAction, {
     onSuccess: async () => {
       toastSuccess({
@@ -177,6 +218,30 @@ function AccountOptionsDropdown({
           <MoreVertical className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
+      
+      {emailAccount.account?.provider === "microsoft" && (
+        <Dialog open={isMailboxDialogOpen} onOpenChange={setIsMailboxDialogOpen}>
+          <DialogContent onClick={(e) => e.stopPropagation()}>
+            <DialogHeader>
+              <DialogTitle>Edit Shared Mailbox</DialogTitle>
+              <DialogDescription>
+                Enter the email address of the Microsoft shared mailbox you want to access. Leave as &quot;me&quot; to use your personal mailbox.
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              value={mailboxAddress}
+              onChange={(e) => setMailboxAddress(e.target.value)}
+              placeholder="me"
+            />
+            <DialogFooter>
+              <Button disabled={isUpdatingMailbox} onClick={handleUpdateMailbox}>
+                Save
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
         <DropdownMenuItem asChild>
           <Link
@@ -188,6 +253,21 @@ function AccountOptionsDropdown({
             Setup
           </Link>
         </DropdownMenuItem>
+        
+        {emailAccount.account?.provider === "microsoft" && (
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setIsMailboxDialogOpen(true);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-2"
+          >
+            <Settings className="size-4" />
+            Shared Mailbox
+          </DropdownMenuItem>
+        )}
+
         <ConfirmDialog
           trigger={
             <DropdownMenuItem

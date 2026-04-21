@@ -18,7 +18,7 @@ export async function markSpam(
     const escapedThreadId = threadId.replace(/'/g, "''");
     const messages = await client
       .getClient()
-      .api("/me/messages")
+      .api(client.getUserPath() + "/messages")
       .filter(`conversationId eq '${escapedThreadId}'`)
       .get();
 
@@ -29,7 +29,7 @@ export async function markSpam(
       messageHandler: (messageId) =>
         withOutlookRetry(
           () =>
-            client.getClient().api(`/me/messages/${messageId}/move`).post({
+            client.getClient().api(`${client.getUserPath()}/messages/${messageId}/move`).post({
               destinationId: "junkemail",
             }),
           logger,
@@ -54,7 +54,7 @@ export async function markSpam(
             () =>
               client
                 .getClient()
-                .api(`/me/messages/${messageId}/move`)
+                .api(`${client.getUserPath()}/messages/${messageId}/move`)
                 .post({ destinationId: "junkemail" }),
             logger,
           ),
