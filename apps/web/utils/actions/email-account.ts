@@ -12,7 +12,7 @@ import { updateContactRole } from "@inboxzero/loops";
 import {
   updateHiddenAiDraftLinksBody,
   updateReferralSignatureBody,
-  updateMailboxAddressBody,
+  addSharedMailboxBody,
 } from "@/utils/actions/email-account.validation";
 import { z } from "zod";
 
@@ -145,19 +145,88 @@ export const fetchSignaturesFromProviderAction = actionClient
     return { signatures };
   });
 
-export const updateMailboxAddressAction = actionClient
-  .metadata({ name: "updateMailboxAddress" })
-  .inputSchema(updateMailboxAddressBody)
+export const addSharedMailboxAction = actionClient
+  .metadata({ name: "addSharedMailbox" })
+  .inputSchema(addSharedMailboxBody)
   .action(
     async ({
-      ctx: { emailAccountId, logger },
-      parsedInput: { mailboxAddress },
+      ctx: { emailAccountId, userId, logger },
+      parsedInput: { sharedEmail },
     }) => {
-      logger.info("Updating mailbox address", { mailboxAddress });
+      logger.info("Adding shared mailbox", { sharedEmail, emailAccountId });
 
-      await prisma.emailAccount.update({
+      // 1. Fetch parent EmailAccount and Account
+      const parentEmailAccount = await prisma.emailAccount.findUnique({
         where: { id: emailAccountId },
-        data: { mailboxAddress: mailboxAddress || "me" },
+        include: {
+          account: true,
+          members: true,
+        },
       });
+
+      if (!parentEmailAccount || !parentEmailAccount.account) {
+        throw new SafeError("Parent email account not found");
+      }
+
+      if (parentEmailAccount.account.provider !== "outlook") {
+        throw new SafeError("Only Outlook accounts support shared mailboxes");
+      }
+
+      const parentAccount = parentEmailAccount.account;
+      const organizationId = parentEmailAccount.members[0]?.organizationId;
+
+      if (!organizationId) {
+        throw new SafeError("Could not find parent organization");
+      }
+
+      const newProviderAccountId = `${parentAccount.providerAccountId}:${sharedEmail}`;
+
+      // Check if it already exists
+      const existingAccount = await prisma.account.findFirst({
+        where: { providerAccountId: newProviderAccountId, provider: "outlook" },
+      });
+      
+      if (existingAccount) {
+        throw new SafeError("Shared mailbox already connected");
+      }
+
+      // Create new Account pointing to shared mailbox
+      const newAccount = await prisma.account.create({
+        data: {
+          userId,
+          provider: parentAccount.provider,
+          type: parentAccount.type,
+          providerAccountId: newProviderAccountId,
+          refresh_token: parentAccount.refresh_token,
+          access_token: parentAccount.access_token,
+          expires_at: parentAccount.expires_at,
+          token_type: parentAccount.token_type,
+          scope: parentAccount.scope,
+          id_token: parentAccount.id_token,
+          session_state: parentAccount.session_state,
+        },
+      });
+
+      // Create the new EmailAccount
+      const newEmailAccount = await prisma.emailAccount.create({
+        data: {
+          email: sharedEmail,
+          userId,
+          accountId: newAccount.id,
+          mailboxAddress: sharedEmail,
+          name: sharedEmail,
+        },
+      });
+
+      // Add to Organization
+      await prisma.member.create({
+        data: {
+          organizationId,
+          emailAccountId: newEmailAccount.id,
+          role: parentEmailAccount.members[0].role || "member",
+        },
+      });
+      
+      return { success: true };
     },
   );

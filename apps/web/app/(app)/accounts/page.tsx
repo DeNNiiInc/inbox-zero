@@ -34,7 +34,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { useAccounts } from "@/hooks/useAccounts";
 import { deleteEmailAccountAction } from "@/utils/actions/user";
-import { updateMailboxAddressAction } from "@/utils/actions/email-account";
+import { addSharedMailboxAction } from "@/utils/actions/email-account";
 import { toastSuccess, toastError } from "@/components/Toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { prefixPath } from "@/utils/path";
@@ -136,11 +136,6 @@ function AccountHeader({
         <CardTitle>{emailAccount.name}</CardTitle>
         <CardDescription>
           {emailAccount.email}
-          {emailAccount.mailboxAddress && emailAccount.mailboxAddress !== "me" && (
-            <span className="mt-1 block text-xs text-muted-foreground font-medium">
-              Shared Mailbox: {emailAccount.mailboxAddress}
-            </span>
-          )}
         </CardDescription>
       </div>
       <div
@@ -175,32 +170,32 @@ function AccountOptionsDropdown({
   onAccountDeleted: () => void;
 }) {
   const [isMailboxDialogOpen, setIsMailboxDialogOpen] = useState(false);
-  const [mailboxAddress, setMailboxAddress] = useState(emailAccount.mailboxAddress || "me");
+  const [sharedEmail, setSharedEmail] = useState("");
 
-  const { execute: executeUpdateMailbox, isExecuting: isUpdatingMailbox } = useAction(
-    updateMailboxAddressAction.bind(null, emailAccount.id), 
+  const { execute: executeAddSharedMailbox, isExecuting: isAddingSharedMailbox } = useAction(
+    addSharedMailboxAction.bind(null, emailAccount.id), 
     {
       onSuccess: () => {
         toastSuccess({
-          title: "Mailbox Address Updated",
-          description: "The shared mailbox address has been saved.",
+          title: "Shared Mailbox Added",
+          description: "The shared mailbox was successfully added as a new account.",
         });
         setIsMailboxDialogOpen(false);
+        setSharedEmail("");
         onAccountDeleted(); // triggers mutate
       },
       onError: (error) => {
         toastError({
-          title: "Error updating address",
+          title: "Error adding shared mailbox",
           description: getActionErrorMessage(error.error),
         });
       },
     }
   );
 
-  const handleUpdateMailbox = () => {
-    executeUpdateMailbox({ mailboxAddress: mailboxAddress || "me" });
+  const handleAddSharedMailbox = () => {
+    executeAddSharedMailbox({ sharedEmail });
   };
-
   const { execute, isExecuting } = useAction(deleteEmailAccountAction, {
     onSuccess: async () => {
       toastSuccess({
@@ -233,19 +228,19 @@ function AccountOptionsDropdown({
         <Dialog open={isMailboxDialogOpen} onOpenChange={setIsMailboxDialogOpen}>
           <DialogContent onClick={(e) => e.stopPropagation()}>
             <DialogHeader>
-              <DialogTitle>Edit Shared Mailbox</DialogTitle>
+              <DialogTitle>Add Shared Mailbox</DialogTitle>
               <DialogDescription>
-                Enter the email address of the Microsoft shared mailbox you want to access. Leave as &quot;me&quot; to use your personal mailbox.
+                Enter the exact email address of the Microsoft shared mailbox you have delegated access to. It will be added as a separate connected account.
               </DialogDescription>
             </DialogHeader>
             <Input
-              value={mailboxAddress}
-              onChange={(e) => setMailboxAddress(e.target.value)}
-              placeholder="me"
+              value={sharedEmail}
+              onChange={(e) => setSharedEmail(e.target.value)}
+              placeholder="shared@company.com"
             />
             <DialogFooter>
-              <Button disabled={isUpdatingMailbox} onClick={handleUpdateMailbox}>
-                Save
+              <Button disabled={isAddingSharedMailbox || !sharedEmail} onClick={handleAddSharedMailbox}>
+                Add Mailbox
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -274,7 +269,7 @@ function AccountOptionsDropdown({
             className="flex items-center gap-2"
           >
             <Settings className="size-4" />
-            Shared Mailbox
+            Add Shared Mailbox
           </DropdownMenuItem>
         )}
 
