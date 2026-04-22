@@ -175,15 +175,11 @@ export const addSharedMailboxAction = actionClient
       const parentAccount = parentEmailAccount.account;
       const organizationId = parentEmailAccount.members[0]?.organizationId;
 
-      if (!organizationId) {
-        throw new SafeError("Could not find parent organization");
-      }
-
       const newProviderAccountId = `${parentAccount.providerAccountId}:${sharedEmail}`;
 
       // Check if it already exists
       const existingAccount = await prisma.account.findFirst({
-        where: { providerAccountId: newProviderAccountId, provider: "outlook" },
+        where: { providerAccountId: newProviderAccountId, provider: parentAccount.provider },
       });
       
       if (existingAccount) {
@@ -218,14 +214,16 @@ export const addSharedMailboxAction = actionClient
         },
       });
 
-      // Add to Organization
-      await prisma.member.create({
-        data: {
-          organizationId,
-          emailAccountId: newEmailAccount.id,
-          role: parentEmailAccount.members[0].role || "member",
-        },
-      });
+      // Add to Organization if parent has one
+      if (organizationId) {
+        await prisma.member.create({
+          data: {
+            organizationId,
+            emailAccountId: newEmailAccount.id,
+            role: parentEmailAccount.members[0]?.role || "member",
+          },
+        });
+      }
       
       return { success: true };
     },
