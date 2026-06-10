@@ -10,6 +10,38 @@ import { ExecutedRuleStatus } from "@/generated/prisma/enums";
 
 const BATCH_SIZE = 50;
 
+function formatErrorMessage(error: unknown): string {
+  let msg = "";
+  if (error instanceof Error) {
+    msg = error.message;
+  } else if (typeof error === 'object' && error !== null && 'message' in error) {
+    msg = String((error as { message: unknown }).message);
+  } else {
+    msg = typeof error === 'object' ? JSON.stringify(error) : String(error);
+  }
+
+  try {
+    // Attempt to parse AI SDK JSON error strings
+    const parsed = JSON.parse(msg);
+    if (parsed.error?.lastError?.data?.error?.message) {
+      return parsed.error.lastError.data.error.message;
+    }
+    if (parsed.lastError?.data?.error?.message) {
+      return parsed.lastError.data.error.message;
+    }
+    if (parsed.error?.message && typeof parsed.error.message === "string") {
+      return parsed.error.message;
+    }
+  } catch {
+    // Ignore JSON parse errors
+  }
+
+  if (msg.length > 500) {
+    return msg.substring(0, 500) + "...";
+  }
+  return msg;
+}
+
 async function handler(request: Request) {
   const body = await request.json();
   const { jobId } = body as { jobId: string };
@@ -210,11 +242,7 @@ async function handler(request: Request) {
              where: { id: jobId },
              data: { 
                errorCount: { increment: 1 },
-               lastError: error instanceof Error 
-                 ? error.message 
-                 : (typeof error === 'object' && error !== null && 'message' in error)
-                   ? String((error as { message: unknown }).message)
-                   : (typeof error === 'object' ? JSON.stringify(error) : String(error))
+               lastError: formatErrorMessage(error)
              }
         });
       }
