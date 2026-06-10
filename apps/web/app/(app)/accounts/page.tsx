@@ -2,7 +2,7 @@
 
 import { useAction } from "next-safe-action/hooks";
 import Link from "next/link";
-import { Trash2, MoreVertical, Settings } from "lucide-react";
+import { Trash2, MoreVertical, Settings, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
@@ -175,6 +175,24 @@ function AccountOptionsDropdown({
 }) {
   const [isMailboxDialogOpen, setIsMailboxDialogOpen] = useState(false);
   const [sharedEmail, setSharedEmail] = useState("");
+  const [isReconnecting, setIsReconnecting] = useState(false);
+
+  const handleReconnect = async () => {
+    if (!emailAccount.account?.provider) return;
+    setIsReconnecting(true);
+    try {
+      const { getAccountLinkingUrl } = await import("@/utils/account-linking");
+      const { redirectToSafeUrl } = await import("@/utils/redirect");
+      const url = await getAccountLinkingUrl(emailAccount.account.provider as "google" | "microsoft");
+      redirectToSafeUrl(url, { allowExternal: true });
+    } catch (error) {
+      console.error("Error reconnecting:", error);
+      import("@/components/Toast").then(({ toastError }) => {
+        toastError({ title: "Error reconnecting", description: "Please try again." });
+      });
+      setIsReconnecting(false);
+    }
+  };
 
   const { execute: executeAddSharedMailbox, isExecuting: isAddingSharedMailbox } = useAction(
     addSharedMailboxAction.bind(null, emailAccount.id), 
@@ -274,6 +292,21 @@ function AccountOptionsDropdown({
           >
             <Settings className="size-4" />
             Add Shared Mailbox
+          </DropdownMenuItem>
+        )}
+        
+        {emailAccount.account?.provider && (
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              handleReconnect();
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-2"
+            disabled={isReconnecting}
+          >
+            <RefreshCw className={`size-4 ${isReconnecting ? "animate-spin" : ""}`} />
+            Reconnect
           </DropdownMenuItem>
         )}
         <ConfirmDialog
