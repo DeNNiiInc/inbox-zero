@@ -60,6 +60,7 @@ export async function getOutlookClientForEmail({
     expiresAt: tokens.expiresAt,
     emailAccountId,
     logger,
+    mailboxAddress: tokens.mailboxAddress,
   });
   return outlook;
 }
@@ -78,6 +79,7 @@ export async function getOutlookAndAccessTokenForEmail({
     expiresAt: tokens.expiresAt,
     emailAccountId,
     logger,
+    mailboxAddress: tokens.mailboxAddress,
   });
   const accessToken = getOutlookAccessToken(outlook);
   return { outlook, accessToken, tokens };
@@ -93,6 +95,7 @@ export async function getOutlookClientForEmailId({
   const account = await prisma.emailAccount.findUnique({
     where: { id: emailAccountId },
     select: {
+      mailboxAddress: true,
       account: {
         select: { access_token: true, refresh_token: true, expires_at: true },
       },
@@ -104,6 +107,7 @@ export async function getOutlookClientForEmailId({
     expiresAt: account?.account.expires_at?.getTime() ?? null,
     emailAccountId,
     logger,
+    mailboxAddress: account?.mailboxAddress,
   });
   return outlook;
 }
@@ -112,6 +116,7 @@ async function getTokens({ emailAccountId }: { emailAccountId: string }) {
   const emailAccount = await prisma.emailAccount.findUnique({
     where: { id: emailAccountId },
     select: {
+      mailboxAddress: true,
       account: {
         select: {
           access_token: true,
@@ -128,5 +133,6 @@ async function getTokens({ emailAccountId }: { emailAccountId: string }) {
     refreshToken: emailAccount?.account.refresh_token,
     expiresAt: emailAccount?.account.expires_at?.getTime() ?? null,
     scope: emailAccount?.account.scope,
+    mailboxAddress: emailAccount?.mailboxAddress,
   };
 }

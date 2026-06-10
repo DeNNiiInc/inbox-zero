@@ -7,3 +7,7 @@ export const updateReferralSignatureBody = z.object({
 export const updateHiddenAiDraftLinksBody = z.object({
   enabled: z.boolean(),
 });
+
+export const addSharedMailboxBody = z.object({
+  sharedEmail: z.string().email(),
+});

@@ -139,6 +139,7 @@ model EmailAccount {
   role                           String? // the role confirmed by the user - previously `User.surveyRole`
   timezone                       String? // User's timezone (IANA tz database format, e.g., "America/Los_Angeles", "Asia/Jerusalem") - handles DST automatically
   calendarBookingLink            String? // User's calendar booking link
+  mailboxAddress                 String    @default("me") // For Outlook shared mailboxes: the shared mailbox email. Defaults to "me".
 
   statsEmailFrequency       Frequency            @default(WEEKLY)
   summaryEmailFrequency     Frequency            @default(WEEKLY)
@@ -209,6 +210,8 @@ model EmailAccount {
   messagingChannels      MessagingChannel[]
   documentFilings        DocumentFiling[]
   filingFolders          FilingFolder[]
+  processedEmails        ProcessedEmail[]
+  bulkProcessingJobs     BulkProcessingJob[]
   apiKeys                ApiKey[]
   classificationFeedback ClassificationFeedback[]
 
@@ -1836,4 +1839,58 @@ enum AutomationJobRunStatus {
   SENT
   SKIPPED
   FAILED
+}
+
+enum BulkProcessingStatus {
+  PENDING
+  PROCESSING
+  PAUSED
+  COMPLETED
+  FAILED
+}
+
+// Tracks emails that have been processed by bulk processing to avoid reprocessing
+model ProcessedEmail {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  emailAccountId String
+  emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+
+  messageId   String // Email provider's message ID
+  threadId    String // Email provider's thread ID
+  processedAt DateTime @default(now())
+  ruleId      String? // Which rule was applied (if any)
+  action      String? // What action was taken (archive, label, etc.)
+
+  @@unique([emailAccountId, messageId])
+  @@index([emailAccountId, processedAt])
+  @@index([threadId])
+}
+
+// Tracks bulk processing jobs for background email processing
+model BulkProcessingJob {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  emailAccountId String
+  emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+
+  status         BulkProcessingStatus @default(PENDING)
+  totalEmails    Int // Target number of emails to process
+  processedCount Int                  @default(0)
+  errorCount     Int                  @default(0)
+  lastError      String?
+
+  startedAt       DateTime?
+  completedAt     DateTime?
+  lastProcessedAt DateTime?
+
+  // Configuration
+  maxEmails   Int? // Limit (5000, 10000, or null for "all")
+  skipArchive Boolean @default(false)
+
+  @@index([emailAccountId, status])
+  @@index([status, updatedAt])
 }

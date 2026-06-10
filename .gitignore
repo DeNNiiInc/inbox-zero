@@ -112,6 +112,6 @@ qa/browser-flows/results/*
 # eval reports
 eval-results/
 
-.agent-worktrees/
-.context/
-.deepsec/
+# secrets
+secrets.php
+new.env

@@ -1,4 +1,4 @@
-import { env } from "@/env";
+﻿import { env } from "@/env";
 import type { Logger } from "@/utils/logger";
 import {
   getMicrosoftGraphClientOptions,
@@ -146,7 +146,7 @@ export async function fetchMicrosoftCalendars(
 > {
   try {
     const response = await calendarClient
-      .api("/me/calendars")
+      .api(`${client.getUserPath()}/calendars`)
       .select("id,name,color,isDefaultCalendar,canEdit,owner")
       .get();
 

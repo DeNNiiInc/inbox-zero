@@ -1,4 +1,4 @@
-import type { OutlookClient } from "@/utils/outlook/client";
+﻿import type { OutlookClient } from "@/utils/outlook/client";
 import type { Logger } from "@/utils/logger";
 import { runWithBoundedConcurrency } from "@/utils/async";
 
@@ -68,7 +68,7 @@ export async function processThreadMessagesFallback({
 }) {
   const messages = await client
     .getClient()
-    .api("/me/messages")
+    .api(`${client.getUserPath()}/messages`)
     .select("id,conversationId")
     .get();
 

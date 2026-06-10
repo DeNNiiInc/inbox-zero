@@ -1,4 +1,4 @@
-import type { OutlookClient } from "@/utils/outlook/client";
+﻿import type { OutlookClient } from "@/utils/outlook/client";
 import type { FileAttachment } from "@microsoft/microsoft-graph-types";
 
 export async function getOutlookAttachment(
@@ -8,7 +8,7 @@ export async function getOutlookAttachment(
 ) {
   const attachment: FileAttachment = await client
     .getClient()
-    .api(`/me/messages/${messageId}/attachments/${attachmentId}`)
+    .api(`${client.getUserPath()}/messages/${messageId}/attachments/${attachmentId}`)
     .get();
 
   return attachment;

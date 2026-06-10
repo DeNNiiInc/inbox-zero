@@ -1,4 +1,4 @@
-import type { Message } from "@microsoft/microsoft-graph-types";
+﻿import type { Message } from "@microsoft/microsoft-graph-types";
 import type { OutlookClient } from "@/utils/outlook/client";
 import type { Attachment } from "nodemailer/lib/mailer";
 import type { SendEmailBody } from "@/utils/gmail/mail";
@@ -53,7 +53,7 @@ export async function sendEmailWithHtml(
     () =>
       client
         .getClient()
-        .api("/me/messages")
+        .api(`${client.getUserPath()}/messages`)
         .post({
           subject: body.subject,
           body: {
@@ -78,7 +78,7 @@ export async function sendEmailWithHtml(
   }
 
   await withOutlookRetry(
-    () => client.getClient().api(`/me/messages/${draft.id}/send`).post({}),
+    () => client.getClient().api(`${client.getUserPath()}/messages/${draft.id}/send`).post({}),
     logger,
   );
 
@@ -117,7 +117,7 @@ export async function replyToEmail(
   // Only createReply/createReplyAll endpoints ensure proper threading
   const replyDraft: Message = await withOutlookRetry(
     () =>
-      client.getClient().api(`/me/messages/${message.id}/createReply`).post({}),
+      client.getClient().api(`${client.getUserPath()}/messages/${message.id}/createReply`).post({}),
     logger,
   );
 
@@ -131,7 +131,7 @@ export async function replyToEmail(
     () =>
       client
         .getClient()
-        .api(`/me/messages/${replyDraft.id}`)
+        .api(`${client.getUserPath()}/messages/${replyDraft.id}`)
         .patch({
           body: {
             contentType: "html",
@@ -158,7 +158,7 @@ export async function replyToEmail(
 
   // Send the draft
   await withOutlookRetry(
-    () => client.getClient().api(`/me/messages/${replyDraft.id}/send`).post({}),
+    () => client.getClient().api(`${client.getUserPath()}/messages/${replyDraft.id}/send`).post({}),
     logger,
   );
 
@@ -192,7 +192,7 @@ export async function forwardEmail(
 
   // Get the original message
   const originalMessage: Message = await withOutlookRetry(
-    () => client.getClient().api(`/me/messages/${options.messageId}`).get(),
+    () => client.getClient().api(`${client.getUserPath()}/messages/${options.messageId}`).get(),
     logger,
   );
 
@@ -220,7 +220,7 @@ export async function forwardEmail(
     () =>
       client
         .getClient()
-        .api(`/me/messages/${options.messageId}/createForward`)
+        .api(`${client.getUserPath()}/messages/${options.messageId}/createForward`)
         .post({}),
     logger,
   );
@@ -234,7 +234,7 @@ export async function forwardEmail(
     () =>
       client
         .getClient()
-        .api(`/me/messages/${forwardDraft.id}`)
+        .api(`${client.getUserPath()}/messages/${forwardDraft.id}`)
         .patch({
           toRecipients,
           ...(ccRecipients ? { ccRecipients } : {}),
@@ -254,7 +254,7 @@ export async function forwardEmail(
 
   await withOutlookRetry(
     () =>
-      client.getClient().api(`/me/messages/${forwardDraft.id}/send`).post({}),
+      client.getClient().api(`${client.getUserPath()}/messages/${forwardDraft.id}/send`).post({}),
     logger,
   );
 
@@ -336,7 +336,7 @@ export async function draftEmail(
     () =>
       client
         .getClient()
-        .api(`/me/messages/${originalEmail.id}`)
+        .api(`${client.getUserPath()}/messages/${originalEmail.id}`)
         .select("isRead")
         .get(),
     logger,
@@ -349,13 +349,13 @@ export async function draftEmail(
     () =>
       client
         .getClient()
-        .api(`/me/messages/${originalEmail.id}/createReplyAll`)
+        .api(`${client.getUserPath()}/messages/${originalEmail.id}/createReplyAll`)
         .post({}),
     logger,
   );
 
   // Update the draft with our content
-  const updateRequest = client.getClient().api(`/me/messages/${replyDraft.id}`);
+  const updateRequest = client.getClient().api(`${client.getUserPath()}/messages/${replyDraft.id}`);
 
   // To handle change key error
   const etag = (replyDraft as { "@odata.etag"?: string })?.["@odata.etag"];
@@ -394,7 +394,7 @@ export async function draftEmail(
       () =>
         client
           .getClient()
-          .api(`/me/messages/${originalEmail.id}`)
+          .api(`${client.getUserPath()}/messages/${originalEmail.id}`)
           .patch({ isRead: false }),
       logger,
     );
@@ -436,7 +436,7 @@ async function sendReplyUsingCreateReply(
     () =>
       client
         .getClient()
-        .api(`/me/messages/${originalMessageId}/createReply`)
+        .api(`${client.getUserPath()}/messages/${originalMessageId}/createReply`)
         .post({}),
     logger,
   );
@@ -449,7 +449,7 @@ async function sendReplyUsingCreateReply(
     () =>
       client
         .getClient()
-        .api(`/me/messages/${replyDraft.id}`)
+        .api(`${client.getUserPath()}/messages/${replyDraft.id}`)
         .patch({
           subject: body.subject,
           body: {
@@ -478,7 +478,7 @@ async function sendReplyUsingCreateReply(
 
   // Send the draft
   await withOutlookRetry(
-    () => client.getClient().api(`/me/messages/${replyDraft.id}/send`).post({}),
+    () => client.getClient().api(`${client.getUserPath()}/messages/${replyDraft.id}/send`).post({}),
     logger,
   );
 
@@ -564,7 +564,7 @@ async function addAttachmentsToDraft({
         () =>
           client
             .getClient()
-            .api(`/me/messages/${draftId}/attachments`)
+            .api(`${client.getUserPath()}/messages/${draftId}/attachments`)
             .post({
               "@odata.type": "#microsoft.graph.fileAttachment",
               name: attachment.filename || "attachment.pdf",
@@ -653,7 +653,7 @@ async function uploadAttachmentViaSession({
     () =>
       client
         .getClient()
-        .api(`/me/messages/${draftId}/attachments/createUploadSession`)
+        .api(`${client.getUserPath()}/messages/${draftId}/attachments/createUploadSession`)
         .post({
           AttachmentItem: {
             attachmentType: "file",

@@ -1,4 +1,4 @@
-import type { Logger } from "@/utils/logger";
+﻿import type { Logger } from "@/utils/logger";
 import type { OutlookClient } from "@/utils/outlook/client";
 import { escapeODataString } from "@/utils/outlook/odata-escape";
 import { getFolderIds } from "@/utils/outlook/message";
@@ -123,7 +123,7 @@ async function moveMessagesInBatches({
     return {
       id: requestId,
       method: "POST",
-      url: `/me/messages/${messageId}/move`,
+      url: `${client.getUserPath()}/messages/${messageId}/move`,
       headers: {
         "Content-Type": "application/json",
       },
@@ -254,7 +254,7 @@ export async function moveMessagesForSenders({
       // First page: use fluent API
       return client
         .getClient()
-        .api("/me/messages")
+        .api(`${client.getUserPath()}/messages`)
         .filter(filterExpression)
         .top(100)
         .select("id,conversationId")

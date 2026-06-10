@@ -22,8 +22,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useAccounts } from "@/hooks/useAccounts";
 import { deleteEmailAccountAction } from "@/utils/actions/user";
+import { addSharedMailboxAction } from "@/utils/actions/email-account";
 import { toastSuccess, toastError } from "@/components/Toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { prefixPath } from "@/utils/path";
@@ -81,6 +91,8 @@ function AccountItem({
     email: string;
     image: string | null;
     isPrimary: boolean;
+    mailboxAddress?: string | null;
+    account?: { provider: string };
   };
   onAccountDeleted: () => void;
 }) {
@@ -106,6 +118,8 @@ function AccountHeader({
     email: string;
     image: string | null;
     isPrimary: boolean;
+    mailboxAddress?: string | null;
+    account?: { provider: string };
   };
   onAccountDeleted: () => void;
 }) {
@@ -119,7 +133,14 @@ function AccountHeader({
       </Avatar>
       <div className="flex flex-col space-y-1.5 flex-1">
         <CardTitle>{emailAccount.name}</CardTitle>
-        <CardDescription>{emailAccount.email}</CardDescription>
+        <CardDescription>
+          {emailAccount.email}
+          {emailAccount.mailboxAddress && emailAccount.mailboxAddress !== "me" && (
+            <span className="mt-1 block text-xs text-muted-foreground font-medium">
+              Shared Mailbox: {emailAccount.mailboxAddress}
+            </span>
+          )}
+        </CardDescription>
       </div>
       <div
         onClick={(e) => e.stopPropagation()}
@@ -147,9 +168,38 @@ function AccountOptionsDropdown({
     id: string;
     email: string;
     isPrimary: boolean;
+    mailboxAddress?: string | null;
+    account?: { provider: string };
   };
   onAccountDeleted: () => void;
 }) {
+  const [isMailboxDialogOpen, setIsMailboxDialogOpen] = useState(false);
+  const [sharedEmail, setSharedEmail] = useState("");
+
+  const { execute: executeAddSharedMailbox, isExecuting: isAddingSharedMailbox } = useAction(
+    addSharedMailboxAction.bind(null, emailAccount.id), 
+    {
+      onSuccess: () => {
+        toastSuccess({
+          title: "Shared Mailbox Added",
+          description: "The shared mailbox was successfully added as a new account.",
+        });
+        setIsMailboxDialogOpen(false);
+        setSharedEmail("");
+        onAccountDeleted(); // triggers mutate
+      },
+      onError: (error) => {
+        toastError({
+          title: "Error adding shared mailbox",
+          description: getActionErrorMessage(error.error),
+        });
+      },
+    }
+  );
+
+  const handleAddSharedMailbox = () => {
+    executeAddSharedMailbox({ sharedEmail });
+  };
   const { execute, isExecuting } = useAction(deleteEmailAccountAction, {
     onSuccess: async () => {
       toastSuccess({
@@ -177,6 +227,30 @@ function AccountOptionsDropdown({
           <MoreVertical className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
+      
+      {emailAccount.account?.provider === "microsoft" && (
+        <Dialog open={isMailboxDialogOpen} onOpenChange={setIsMailboxDialogOpen}>
+          <DialogContent onClick={(e) => e.stopPropagation()}>
+            <DialogHeader>
+              <DialogTitle>Add Shared Mailbox</DialogTitle>
+              <DialogDescription>
+                Enter the exact email address of the Microsoft shared mailbox you have delegated access to. It will be added as a separate connected account.
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              value={sharedEmail}
+              onChange={(e) => setSharedEmail(e.target.value)}
+              placeholder="shared@company.com"
+            />
+            <DialogFooter>
+              <Button disabled={isAddingSharedMailbox || !sharedEmail} onClick={handleAddSharedMailbox}>
+                Add Mailbox
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
         <DropdownMenuItem asChild>
           <Link
@@ -188,6 +262,20 @@ function AccountOptionsDropdown({
             Setup
           </Link>
         </DropdownMenuItem>
+        
+        {emailAccount.account?.provider === "microsoft" && (
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setIsMailboxDialogOpen(true);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-2"
+          >
+            <Settings className="size-4" />
+            Add Shared Mailbox
+          </DropdownMenuItem>
+        )}
         <ConfirmDialog
           trigger={
             <DropdownMenuItem
