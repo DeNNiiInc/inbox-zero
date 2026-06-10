@@ -48,7 +48,7 @@ export async function startBulkProcessing({
   await bulkPublishToQstash({
     items: [{
       body: { jobId: job.id },
-      url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/user/bulk-process/worker`,
+      path: "/api/user/bulk-process/worker",
     }],
   });
 
@@ -115,7 +115,7 @@ export async function resumeBulkProcessing(emailAccountId: string, jobId: string
   await bulkPublishToQstash({
     items: [{
       body: { jobId: job.id },
-      url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/user/bulk-process/worker`,
+      path: "/api/user/bulk-process/worker",
     }],
   });
 

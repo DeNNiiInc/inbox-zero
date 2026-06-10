@@ -243,7 +243,7 @@ async function handler(request: Request) {
       await bulkPublishToQstash({
         items: [{
           body: { jobId },
-          url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/user/bulk-process/worker`,
+          path: "/api/user/bulk-process/worker",
         }],
       });
     } else if (reachedLimit) {
