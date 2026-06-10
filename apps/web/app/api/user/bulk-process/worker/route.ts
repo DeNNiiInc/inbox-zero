@@ -4,6 +4,7 @@ import prisma from "@/utils/prisma";
 import { createEmailProvider } from "@/utils/email/provider";
 import { runRules } from "@/utils/ai/choose-rule/run-rules";
 import { createScopedLogger } from "@/utils/logger";
+import { redis } from "@/utils/redis";
 import { bulkPublishToQstash } from "@/utils/upstash";
 import type { ParsedMessage } from "@/utils/types";
 import { ExecutedRuleStatus } from "@/generated/prisma/enums";
@@ -86,42 +87,26 @@ async function handler(request: Request) {
       logger,
     });
 
-    // Determine how many emails to fetch
-    // We need to fetch more than BATCH_SIZE because some might be skipped (deduplicated)
     const fetchLimit = BATCH_SIZE * 3; 
     
-    // We don't have a reliable way to "paginate" based on processed emails in IMAP/Graph
-    // without fetching them. So we rely on deduplication.
-    // Ideally, we'd use a "since" date or ID, but for "all emails", we might simply 
-    // fetch distinct batches or rely on the fact that we process latest first.
-    // For now, let's fetch emails and see which ones are not processed.
-    
-    // NOTE: This basic strategy (fetch latest N) works best if we process from latest to oldest
-    // and assume the user isn't receiving massive amounts of new email WHILE processing.
-    // For a more robust solution, we'd need to store a high-water mark or cursor.
-    // Given the constraints, we'll fetch latest emails. If "maxEmails" is set, we respect it.
-    
-    // BUT: If we always fetch the latest, and we skip processed ones, we might just keep
-    // fetching the *same* processed ones if we don't have a way to skip them in the query.
-    // Most providers don't support "exclude specific IDs".
-    // workaround: We can't easily skip *in query*.
-    
-    // For "All" emails, or large batches, we should likely iterate.
-    // However, `getInboxMessages` usually just returns latest.
-    // If we have processed the latest 50, and we ask for 50 again, we get the same 50.
-    // WE NEED A OFFSET or DATE filter.
-    
-    // Let's implement a simple "lastProcessedDate" logic if possible, or just accept
-    // that we might need to scan through a lot of processed emails to find new ones.
-    
-    // ALTERNATIVE: Use `getMessages` with an offset? The provider interface usually just has `getInboxMessages(limit)`.
-    // Let's check the provider creation.
-    
-    const messages = await emailProvider.getInboxMessages(fetchLimit);
+    const isArchiving = !job.skipArchive;
+    const pageTokenKey = `bulk-process:pageToken:${jobId}`;
+    let pageToken: string | undefined = undefined;
+
+    if (!isArchiving) {
+      pageToken = await redis.get<string>(pageTokenKey) || undefined;
+    }
+
+    const { messages, nextPageToken } = await emailProvider.getMessagesWithPagination({
+      inboxOnly: true,
+      maxResults: fetchLimit,
+      pageToken,
+    });
 
     if (messages.length === 0) {
       // No messages found, we are done
       await completeJob(jobId);
+      if (!isArchiving) await redis.del(pageTokenKey);
       return NextResponse.json({ status: "COMPLETED", count: 0 });
     }
 
@@ -140,51 +125,31 @@ async function handler(request: Request) {
     
     const messagesToProcess = messages.filter((m) => !processedSet.has(m.id));
     
-    // If we found nothing new in this batch, and we fetched fewer than we asked for (meaning end of inbox),
-    // OR if we have simply scanned unrelated emails...
-    // Issue: If we have 1000 emails, allowing 50 per batch.
-    // Batch 1: Get latest 150. Process 50.
-    // Batch 2: Get latest 150. The first 50 are processed. We process next 50.
-    // This works fine UNTIL we exceed the fetch limit (150).
-    // If we have processed 150 emails, `getInboxMessages(150)` returns only processed emails.
-    // We need to fetch *deeper*.
-    
-    // IMPORTANT: The `getInboxMessages` in this codebase generally doesn't support offset.
-    // This is a known limitation. We would need to extend the provider interface to support pagination/older tokens.
-    // For now, to solve the immediate request without rewriting all providers, we might be limited 
-    // to how many we can fetch at once or we rely on the fact that user said "All".
-    
-    // However, `imap` provider DOES accept `limit`.
-    // If we want "all", we might need a way to say "fetch messages older than X".
-    
-    // Let's try to process as many as we found in this "lookahead" batch.
-    
     // Only process up to BATCH_SIZE
     const batch = messagesToProcess.slice(0, BATCH_SIZE);
     
     if (batch.length === 0) {
-      // We found only processed emails in the top N.
-      // This suggests we might be done, OR we need to look deeper.
-      // Without pagination support in the generic provider, we update the job to completed
-      // if we can't find any processing work in the fetch window.
-      // This is a tradeoff: we only process correctly if `getInboxMessages` returns unseen emails.
-      // BUT: If the user archives emails, they disappear from Inbox.
-      // If the bulk action is "Archive", then the next fetch WILL return new emails!
-      // This is the key: MOST rules will move emails out of inbox.
-      
-      const isArchiving = !job.skipArchive;
-      
       if (isArchiving) {
-         // If we are archiving, and we found no new messages, it means the inbox is effectively empty of unprocessed items
-         // (or at least the top N are all processed/skipped).
          await completeJob(jobId);
          return NextResponse.json({ status: "COMPLETED", reason: "No new messages in fetch window" });
       } else {
-         // If NOT archiving, we are stuck seeing the same emails.
-         // In this case, bulk processing "All" without archive is tricky without pagination.
-         // We will just stop to avoid infinite loop.
-         await completeJob(jobId);
-         return NextResponse.json({ status: "COMPLETED", reason: "No new messages (non-archiving mode)" });
+         if (nextPageToken) {
+            // All messages on this page are processed, move to next page
+            await redis.set(pageTokenKey, nextPageToken, { ex: 60 * 60 * 24 });
+            // Queue next worker iteration
+            await bulkPublishToQstash({
+              items: [{
+                path: "/api/user/bulk-process/worker",
+                body: { jobId },
+              }],
+            });
+            return NextResponse.json({ status: "CONTINUED", reason: "Page fully processed, moving to next page" });
+         } else {
+            // No more pages
+            await completeJob(jobId);
+            await redis.del(pageTokenKey);
+            return NextResponse.json({ status: "COMPLETED", reason: "All pages processed (non-archiving mode)" });
+         }
       }
     }
 
