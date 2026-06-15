@@ -103,14 +103,44 @@ export async function processHistoryForUser({
         const isInInbox = message.labelIds?.includes("INBOX") || false;
         const isInSentItems = message.labelIds?.includes("SENT") || false;
 
+        // Detect when folder resolution failed: message has a parentFolderId
+        // but no folder-based label was resolved. This typically happens when
+        // Microsoft Graph throttles folder lookups (MailboxConcurrency limit),
+        // especially after server restarts when many webhooks arrive at once.
+        const FOLDER_LABELS = new Set([
+          "INBOX",
+          "SENT",
+          "DRAFT",
+          "SPAM",
+          "TRASH",
+          "ARCHIVE",
+        ]);
+        const hasFolderLabel = message.labelIds?.some((l) =>
+          FOLDER_LABELS.has(l),
+        );
+        const folderResolutionFailed =
+          !!message.parentFolderId && !hasFolderLabel;
+
         if (!isInInbox && !isInSentItems) {
-          logger.info("Skipping message not in inbox or sent items", {
-            labelIds: message.labelIds,
-            from: message.headers.from,
-            to: message.headers.to,
-            subject: message.subject,
-          });
-          return NextResponse.json({ ok: true });
+          if (folderResolutionFailed) {
+            // Folder resolution failed — we can't determine the folder, so
+            // process the message anyway rather than silently dropping it.
+            logger.warn(
+              "Folder resolution incomplete — processing message despite unknown folder",
+              {
+                labelIds: message.labelIds,
+                parentFolderId: message.parentFolderId,
+              },
+            );
+          } else {
+            logger.info("Skipping message not in inbox or sent items", {
+              labelIds: message.labelIds,
+              from: message.headers.from,
+              to: message.headers.to,
+              subject: message.subject,
+            });
+            return NextResponse.json({ ok: true });
+          }
         }
 
         // Now acquire lock (only for INBOX/SENT messages)
